@@ -1,6 +1,6 @@
 //@name CPM Component - Chat Input Resizer
 //@display-name Cupcake UI Resizer
-//@version 0.3.0
+//@version 0.3.4
 //@author Cupcake
 //@update-url https://raw.githubusercontent.com/ruyari-cupcake/cupcake-plugin-manager/main/cpm-chat-resizer.js
 
@@ -109,6 +109,71 @@
 
         const rootDoc = await risuai.getRootDocument();
 
+        // ==========================================
+        // 1.4 CHATVAR PRE-INITIALIZATION (FOLD null fix)
+        // ==========================================
+        // FOLD module's {{getvar::fold_ui}} returns literal 'null' when
+        // the variable hasn't been set yet (getChatVar returns 'null' for
+        // undefined keys). Pre-initialise to '' so it renders invisibly.
+        // Only runs once at startup; does NOT overwrite if FOLD already set it.
+        const preinitChatVars = async () => {
+            try {
+                const char = await risuai.getCharacter();
+                if (!char?.chats || char.chatPage === undefined) return;
+                const chat = char.chats[char.chatPage];
+                if (!chat) return;
+                if (!chat.scriptstate) chat.scriptstate = {};
+
+                let changed = false;
+                // fold_ui: FOLD 2.0 module
+                if (chat.scriptstate['$fold_ui'] === undefined ||
+                    chat.scriptstate['$fold_ui'] === null) {
+                    chat.scriptstate['$fold_ui'] = '';
+                    changed = true;
+                }
+
+                if (changed) {
+                    await risuai.setCharacter(char);
+                    console.log('[CPM Resizer] Pre-initialized fold_ui chat variable to empty string.');
+                }
+            } catch (err) {
+                console.warn('[CPM Resizer] preinitChatVars error:', err?.message || err);
+            }
+        };
+
+        // ==========================================
+        // 1.5 BACKGROUND NULL SCRUBBER (FOLD-safe)
+        // ==========================================
+        // RisuAI BackgroundDom container is unique:
+        //   <div class="absolute top-0 left-0 w-full h-full">
+        // We only scrub this container, so chat/description text is untouched.
+        const scrubBackgroundNull = async () => {
+            try {
+                // NOTE: querySelectorAll is broken in V3 sandbox (SafeElement[] can't
+                // be serialized via postMessage structured clone). Use querySelector.
+                const overlay = await rootDoc.querySelector('.absolute.top-0.left-0.w-full.h-full');
+                if (!overlay) return;
+
+                const html = await overlay.getInnerHTML();
+                if (!html || typeof html !== 'string') return;
+
+                // Remove <p>null</p> (from ParseMarkdown wrapping the 'null' string),
+                // bare "null" text nodes, and leftover empty <p> tags.
+                const cleaned = html
+                    .replace(/<p>\s*null\s*<\/p>/gi, '')
+                    .replace(/>\s*null\s*</g, '><')
+                    .replace(/<p>\s*<\/p>/g, '');
+
+                if (cleaned !== html) {
+                    await overlay.setInnerHTML(cleaned);
+                    console.log('[CPM Resizer] Scrubbed background null text.');
+                }
+            } catch (err) {
+                console.warn('[CPM Resizer] scrubBackgroundNull error:', err?.message || err);
+            }
+        };
+
+
         // Safe helper to get arguments silently
         const safeGetArg = async (key, defaultValue = '') => {
             try {
@@ -198,12 +263,6 @@
 
                 const parent = await ta.getParent();
                 if (parent && !(await parent.querySelector('.cpm-resize-btn'))) {
-
-                    // Ensure parent has relative positioning for absolute button
-                    const pos = await parent.getStyle('position');
-                    if (!pos || pos === 'static' || pos === '') {
-                        await parent.setStyle('position', 'relative');
-                    }
 
                     const btn = await rootDoc.createElement('button');
                     const btnId = 'cpm-btn-' + Math.random().toString(36).substring(2, 9);
@@ -309,13 +368,18 @@
 
         // Initialize: check enabled, then start observing
         const initResizer = async () => {
+            // Pre-initialise fold_ui so {{getvar::fold_ui}} renders '' not 'null'
+            await preinitChatVars();
+
+            // Always run null scrubber once at startup (independent of resizer toggle)
+            await scrubBackgroundNull();
+
             if (isResizerEnabled === null) {
                 const arg = await safeGetArg('cpm_enable_chat_resizer');
                 isResizerEnabled = (arg === 'false' || arg === false) ? false : true;
             }
             if (isResizerEnabled === false) {
-                console.log('[CPM Resizer] Disabled by user setting.');
-                return;
+                console.log('[CPM Resizer] Resizer UI disabled by user setting (null scrubber remains active).');
             }
 
             const body = await rootDoc.querySelector('body');
@@ -329,40 +393,53 @@
             // Debounced to 400ms. Processes up to 3 textareas per trigger
             // to handle batch renders (e.g., opening a character editor).
             let scanPending = false;
+            let nullScrubPending = false;
             const observer = await risuai.createMutationObserver(async () => {
-                if (isResizerEnabled === false) return;
-                if (scanPending) return;
-                scanPending = true;
-                setTimeout(async () => {
-                    scanPending = false;
-                    try {
-                        for (let i = 0; i < 3; i++) {
-                            const ta = await rootDoc.querySelector('textarea:not([x-cpm-resizer])');
-                            if (!ta) break;
-                            await attachButtonToTextarea(ta);
-                        }
-                    } catch (_) {}
-                }, 400);
+                if (isResizerEnabled !== false) {
+                    if (!scanPending) {
+                        scanPending = true;
+                        setTimeout(async () => {
+                            scanPending = false;
+                            try {
+                                for (let i = 0; i < 3; i++) {
+                                    const ta = await rootDoc.querySelector('textarea:not([x-cpm-resizer])');
+                                    if (!ta) break;
+                                    await attachButtonToTextarea(ta);
+                                }
+                            } catch (_) {}
+                        }, 400);
+                    }
+                }
+
+                if (!nullScrubPending) {
+                    nullScrubPending = true;
+                    setTimeout(async () => {
+                        nullScrubPending = false;
+                        await scrubBackgroundNull();
+                    }, 250);
+                }
             });
             await observer.observe(body, { childList: true, subtree: true });
             window._cpmResizerObserver = observer;
             console.log('[CPM Resizer] MutationObserver active (primary).');
 
-            // === pointerdown delegation (BACKUP for lazy init) ===
-            // When user taps/clicks a textarea, attach button if not yet processed.
-            // pointerdown IS in the SafeElement allowed event list (unlike focusin).
-            if (window._cpmResizerPointerListenerId) {
-                try { await body.removeEventListener('pointerdown', window._cpmResizerPointerListenerId); } catch (_) {}
-            }
-            try {
-                window._cpmResizerPointerListenerId = await body.addEventListener('pointerdown', handlePointerDown);
-                console.log('[CPM Resizer] pointerdown delegation active (backup).');
-            } catch (evtErr) {
-                console.warn('[CPM Resizer] pointerdown listener failed:', evtErr.message);
-            }
+            if (isResizerEnabled !== false) {
+                // === pointerdown delegation (BACKUP for lazy init) ===
+                // When user taps/clicks a textarea, attach button if not yet processed.
+                // pointerdown IS in the SafeElement allowed event list (unlike focusin).
+                if (window._cpmResizerPointerListenerId) {
+                    try { await body.removeEventListener('pointerdown', window._cpmResizerPointerListenerId); } catch (_) {}
+                }
+                try {
+                    window._cpmResizerPointerListenerId = await body.addEventListener('pointerdown', handlePointerDown);
+                    console.log('[CPM Resizer] pointerdown delegation active (backup).');
+                } catch (evtErr) {
+                    console.warn('[CPM Resizer] pointerdown listener failed:', evtErr.message);
+                }
 
-            // Small initial scan for textareas already visible
-            await initialScan();
+                // Small initial scan for textareas already visible
+                await initialScan();
+            }
         };
 
         // Cleanup function for hot-reload

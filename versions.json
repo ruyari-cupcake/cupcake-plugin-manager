@@ -35,9 +35,9 @@
         "changes": "_awsSmartFetch 도입 (risuFetch 우선, nativeFetch fallback)"
     },
     "CPM Component - Chat Input Resizer": {
-        "version": "0.3.0",
+        "version": "0.3.4",
         "file": "cpm-chat-resizer.js",
-        "changes": "lazy init, pointerdown delegation, cleanup hooks"
+        "changes": "FOLD null fix: chatvar 사전초기화 + BackgroundDom scrubber (querySelectorAll→querySelector)"
     },
     "CPM Component - Copilot Token Manager": {
         "version": "1.7.0",
