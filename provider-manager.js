@@ -2636,44 +2636,56 @@ async function handleRequest(args, activeModelDef, abortSignal) {
 // Workaround: inject <script nonce="..."> tags instead.
 // Closure-scope variables are exposed on window for global-scope access.
 
-let _cpmNonce = '';
 function _extractNonce() {
-    if (_cpmNonce) return _cpmNonce;
+    // No caching — nonce can rotate in SPA navigation
     for (const s of document.querySelectorAll('script')) {
-        if (s.nonce) { _cpmNonce = s.nonce; return _cpmNonce; }
+        if (s.nonce) return s.nonce;
     }
     const meta = document.querySelector('meta[http-equiv="Content-Security-Policy"]');
     if (meta) {
         const m = meta.content.match(/'nonce-([^']+)'/);
-        if (m) { _cpmNonce = m[1]; return _cpmNonce; }
+        if (m) return m[1];
     }
     return '';
 }
 
 function _executeViaScriptTag(code, pluginName) {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
         const nonce = _extractNonce();
-        const cbId = '_cpm_cb_' + Math.random().toString(36).substr(2, 9);
-        const safeName = (pluginName || 'unknown').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-        window[cbId] = resolve;
-        const wrapped = `(async () => {\ntry {\n${code}\nwindow['${cbId}']();\n} catch(err) {\nconsole.error('[CPM Loader] Error executing plugin ${safeName}:', err);\nwindow['${cbId}']();\n} finally {\ndelete window['${cbId}'];\n}\n})();`;
+        if (!nonce) {
+            console.error('[CPM CSP] No nonce found — script execution will likely be blocked');
+        }
+        const cbId = '_cpm_cb_' + crypto.randomUUID().replace(/-/g, '');
+        const safeName = JSON.stringify(pluginName || 'unknown');
+        // Timeout safety net: if CSP blocks the script, resolve won't be called
+        const timeout = setTimeout(() => {
+            if (window[cbId]) {
+                delete window[cbId];
+                reject(new Error(`Plugin ${pluginName} script timed out (CSP block?)`));
+            }
+        }, 10000);
+        window[cbId] = (err) => {
+            clearTimeout(timeout);
+            delete window[cbId];
+            if (err) reject(err);
+            else resolve();
+        };
+        const wrapped = `(async () => {\ntry {\n${code}\nwindow['${cbId}']();\n} catch(err) {\nconsole.error('[CPM Loader] Error executing plugin ' + ${safeName} + ':', err);\nwindow['${cbId}'](err);\n}\n})();`;
         const s = document.createElement('script');
         if (nonce) s.nonce = nonce;
+        s.dataset.cpmPlugin = pluginName || 'unknown';
         s.textContent = wrapped;
         document.head.appendChild(s);
-        s.remove();
     });
 }
 
 function _exposeScopeToWindow() {
-    if (window.__cpm_scope_exposed) return;
-    window.__cpm_scope_exposed = true;
-    // Functions (stable references)
+    // Functions — always overwrite to reflect hot-reload updates
     const fns = { fetchCustom, fetchByProviderId, handleRequest, safeGetArg, safeGetBoolArg, smartNativeFetch, sanitizeMessages, stripInternalTags, safeStringify, sanitizeBodyJSON, isDynamicFetchEnabled, inferSlot, buildGeminiThinkingConfig, formatToOpenAI, formatToAnthropic, formatToGemini, createSSEStream, parseOpenAISSELine, createAnthropicSSEStream, parseGeminiSSELine, collectStream, checkStreamCapability, ensureCopilotApiToken, getGeminiSafetySettings, validateGeminiParams, isExperimentalGeminiModel, cleanExperimentalModelParams, stripThoughtDisplayContent, saveThoughtSignatureFromStream, parseGeminiNonStreamingResponse, parseClaudeNonStreamingResponse };
-    for (const [k, v] of Object.entries(fns)) { if (!(k in window)) window[k] = v; }
+    for (const [k, v] of Object.entries(fns)) { window[k] = v; }
     // Const objects (reference stable, mutations shared)
     const objs = { customFetchers, registeredProviderTabs, pendingDynamicFetchers, _pluginRegistrations, SubPluginManager, SettingsBackup, KeyPool, CPM_SLOT_LIST, AwsV4Signer, ThoughtSignatureCache };
-    for (const [k, v] of Object.entries(objs)) { if (!(k in window)) window[k] = v; }
+    for (const [k, v] of Object.entries(objs)) { window[k] = v; }
     // Let variables (live getter/setter for reassignment tracking)
     const lets = {
         ALL_DEFINED_MODELS: [() => ALL_DEFINED_MODELS, v => { ALL_DEFINED_MODELS = v; }],
@@ -2681,11 +2693,13 @@ function _exposeScopeToWindow() {
         _currentExecutingPluginId: [() => _currentExecutingPluginId, v => { _currentExecutingPluginId = v; }],
         vertexTokenCache: [() => vertexTokenCache, v => { vertexTokenCache = v; }],
         _lastCustomApiRequest: [() => _lastCustomApiRequest, v => { _lastCustomApiRequest = v; }],
+        _streamBridgeCapable: [() => _streamBridgeCapable, v => { _streamBridgeCapable = v; }],
+        _copilotTokenCache: [() => _copilotTokenCache, v => { _copilotTokenCache = v; }],
     };
     for (const [k, [g, s]] of Object.entries(lets)) {
-        if (!(k in window)) Object.defineProperty(window, k, { get: g, set: s, configurable: true });
+        Object.defineProperty(window, k, { get: g, set: s, configurable: true });
     }
-    if (!('CPM_VERSION' in window)) window.CPM_VERSION = CPM_VERSION;
+    window.CPM_VERSION = CPM_VERSION;
     console.log('[CPM CSP] Internal scope exposed to window for <script nonce> execution');
 }
 
