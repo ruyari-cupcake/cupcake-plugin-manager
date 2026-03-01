@@ -562,14 +562,14 @@ const SubPluginManager = {
     },
 
     async executeEnabled() {
+        _exposeScopeToWindow();
         window.CupcakePM_SubPlugins = window.CupcakePM_SubPlugins || [];
         for (const p of this.plugins) {
             if (p.enabled) {
                 try {
                     _currentExecutingPluginId = p.id;
                     if (!_pluginRegistrations[p.id]) _pluginRegistrations[p.id] = { providerNames: [], tabObjects: [], fetcherEntries: [] };
-                    const execWrapper = `(async () => {\ntry {\n${p.code}\n} catch(err) {\nconsole.error('[CPM Loader] Error executing plugin ${p.name}:', err);\n}\n})();`;
-                    await eval(execWrapper);
+                    await _executeViaScriptTag(p.code, p.name);
                     console.log(`[CPM Loader] Loaded Sub-Plugin: ${p.name}`);
                 } catch (e) {
                     console.error(`[CPM Loader] Failed to load ${p.name}`, e);
@@ -894,11 +894,11 @@ const SubPluginManager = {
     // Execute a single plugin (sets tracking context)
     async executeOne(plugin) {
         if (!plugin || !plugin.enabled) return;
+        _exposeScopeToWindow();
         try {
             _currentExecutingPluginId = plugin.id;
             if (!_pluginRegistrations[plugin.id]) _pluginRegistrations[plugin.id] = { providerNames: [], tabObjects: [], fetcherEntries: [] };
-            const execWrapper = `(async () => {\ntry {\n${plugin.code}\n} catch(err) {\nconsole.error('[CPM Loader] Error executing plugin ${plugin.name}:', err);\n}\n})();`;
-            await eval(execWrapper);
+            await _executeViaScriptTag(plugin.code, plugin.name);
             console.log(`[CPM Loader] Hot-loaded Sub-Plugin: ${plugin.name}`);
         } catch (e) {
             console.error(`[CPM Loader] Failed to hot-load ${plugin.name}`, e);
@@ -2627,6 +2627,66 @@ async function handleRequest(args, activeModelDef, abortSignal) {
     }
 
     return result;
+}
+
+// ==========================================
+// CSP-SAFE CODE EXECUTION (eval() replacement)
+// ==========================================
+// RisuAI V3 CSP blocks eval() and new Function().
+// Workaround: inject <script nonce="..."> tags instead.
+// Closure-scope variables are exposed on window for global-scope access.
+
+let _cpmNonce = '';
+function _extractNonce() {
+    if (_cpmNonce) return _cpmNonce;
+    for (const s of document.querySelectorAll('script')) {
+        if (s.nonce) { _cpmNonce = s.nonce; return _cpmNonce; }
+    }
+    const meta = document.querySelector('meta[http-equiv="Content-Security-Policy"]');
+    if (meta) {
+        const m = meta.content.match(/'nonce-([^']+)'/);
+        if (m) { _cpmNonce = m[1]; return _cpmNonce; }
+    }
+    return '';
+}
+
+function _executeViaScriptTag(code, pluginName) {
+    return new Promise((resolve) => {
+        const nonce = _extractNonce();
+        const cbId = '_cpm_cb_' + Math.random().toString(36).substr(2, 9);
+        const safeName = (pluginName || 'unknown').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+        window[cbId] = resolve;
+        const wrapped = `(async () => {\ntry {\n${code}\nwindow['${cbId}']();\n} catch(err) {\nconsole.error('[CPM Loader] Error executing plugin ${safeName}:', err);\nwindow['${cbId}']();\n} finally {\ndelete window['${cbId}'];\n}\n})();`;
+        const s = document.createElement('script');
+        if (nonce) s.nonce = nonce;
+        s.textContent = wrapped;
+        document.head.appendChild(s);
+        s.remove();
+    });
+}
+
+function _exposeScopeToWindow() {
+    if (window.__cpm_scope_exposed) return;
+    window.__cpm_scope_exposed = true;
+    // Functions (stable references)
+    const fns = { fetchCustom, fetchByProviderId, handleRequest, safeGetArg, safeGetBoolArg, smartNativeFetch, sanitizeMessages, stripInternalTags, safeStringify, sanitizeBodyJSON, isDynamicFetchEnabled, inferSlot, buildGeminiThinkingConfig, formatToOpenAI, formatToAnthropic, formatToGemini, createSSEStream, parseOpenAISSELine, createAnthropicSSEStream, parseGeminiSSELine, collectStream, checkStreamCapability, ensureCopilotApiToken, getGeminiSafetySettings, validateGeminiParams, isExperimentalGeminiModel, cleanExperimentalModelParams, stripThoughtDisplayContent, saveThoughtSignatureFromStream, parseGeminiNonStreamingResponse, parseClaudeNonStreamingResponse };
+    for (const [k, v] of Object.entries(fns)) { if (!(k in window)) window[k] = v; }
+    // Const objects (reference stable, mutations shared)
+    const objs = { customFetchers, registeredProviderTabs, pendingDynamicFetchers, _pluginRegistrations, SubPluginManager, SettingsBackup, KeyPool, CPM_SLOT_LIST, AwsV4Signer, ThoughtSignatureCache };
+    for (const [k, v] of Object.entries(objs)) { if (!(k in window)) window[k] = v; }
+    // Let variables (live getter/setter for reassignment tracking)
+    const lets = {
+        ALL_DEFINED_MODELS: [() => ALL_DEFINED_MODELS, v => { ALL_DEFINED_MODELS = v; }],
+        CUSTOM_MODELS_CACHE: [() => CUSTOM_MODELS_CACHE, v => { CUSTOM_MODELS_CACHE = v; }],
+        _currentExecutingPluginId: [() => _currentExecutingPluginId, v => { _currentExecutingPluginId = v; }],
+        vertexTokenCache: [() => vertexTokenCache, v => { vertexTokenCache = v; }],
+        _lastCustomApiRequest: [() => _lastCustomApiRequest, v => { _lastCustomApiRequest = v; }],
+    };
+    for (const [k, [g, s]] of Object.entries(lets)) {
+        if (!(k in window)) Object.defineProperty(window, k, { get: g, set: s, configurable: true });
+    }
+    if (!('CPM_VERSION' in window)) window.CPM_VERSION = CPM_VERSION;
+    console.log('[CPM CSP] Internal scope exposed to window for <script nonce> execution');
 }
 
 // ==========================================
