@@ -515,7 +515,7 @@
                 <div class="bg-gray-900 rounded-xl w-full max-w-md border border-gray-700 overflow-hidden">
                     <div class="flex items-center justify-between px-5 py-4 border-b border-gray-700">
                         <h3 class="text-lg font-bold text-white">🔑 GitHub Copilot 토큰 생성</h3>
-                        <button onclick="document.getElementById('${DIALOG_ID}')?.remove()" class="text-gray-400 hover:text-white text-xl px-2">✕</button>
+                        <button data-action="close-dialog" data-dialog-id="${DIALOG_ID}" class="text-gray-400 hover:text-white text-xl px-2">✕</button>
                     </div>
                     <div class="p-5">
                         <div class="bg-gray-800 rounded-lg p-5 mb-4 space-y-4">
@@ -525,19 +525,32 @@
                                 <div class="flex-1"><span class="text-gray-200">아래 코드를 입력하세요:</span>
                                     <div class="flex items-center justify-between bg-gray-700 p-3 rounded-md mt-2">
                                         <span class="font-mono text-2xl tracking-widest text-white font-bold" id="${DIALOG_ID}-code">${escapeHtml(deviceCode.user_code)}</span>
-                                        <button onclick="navigator.clipboard.writeText(document.getElementById('${DIALOG_ID}-code').textContent).then(()=>{})" class="bg-gray-600 hover:bg-gray-500 text-white text-xs px-3 py-1 rounded">복사</button>
+                                        <button data-action="copy-code" data-code-id="${DIALOG_ID}-code" class="bg-gray-600 hover:bg-gray-500 text-white text-xs px-3 py-1 rounded">복사</button>
                                     </div></div></div>
                             <div class="flex items-start"><span class="bg-blue-600 text-white w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold mr-3 shrink-0">3</span>
                                 <span class="text-gray-200">GitHub 계정으로 인증하세요</span></div>
                         </div>
                         <p class="text-gray-400 text-center text-sm mb-4">인증을 완료한 후 확인 버튼을 클릭하세요.</p>
                         <div class="flex justify-end space-x-3">
-                            <button onclick="document.getElementById('${DIALOG_ID}')?.remove()" class="bg-gray-700 hover:bg-gray-600 text-white px-5 py-2 rounded-lg text-sm">취소</button>
+                            <button data-action="close-dialog" data-dialog-id="${DIALOG_ID}" class="bg-gray-700 hover:bg-gray-600 text-white px-5 py-2 rounded-lg text-sm">취소</button>
                             <button id="${DIALOG_ID}-confirm" class="bg-blue-600 hover:bg-blue-500 text-white px-5 py-2 rounded-lg text-sm font-bold">확인</button>
                         </div>
                     </div>
                 </div>`;
             dialog.addEventListener('keydown', (e) => { if (e.key === 'Escape') dialog.remove(); });
+            dialog.addEventListener('click', (e) => {
+                const btn = e.target.closest('[data-action]');
+                if (!btn) return;
+                const action = btn.dataset.action;
+                if (action === 'close-dialog') {
+                    const id = btn.dataset.dialogId;
+                    document.getElementById(id)?.remove();
+                } else if (action === 'copy-code') {
+                    const codeId = btn.dataset.codeId;
+                    const text = document.getElementById(codeId)?.textContent ?? '';
+                    navigator.clipboard.writeText(text).then(() => {});
+                }
+            });
             document.body.appendChild(dialog);
 
             document.getElementById(`${DIALOG_ID}-confirm`).addEventListener('click', async function () {
@@ -852,8 +865,38 @@
         } catch (e) { showError(e.message); }
     };
 
-    // Expose on window for inline onclick (settings tab HTML uses these)
+    // Expose on window so event delegation can dispatch to handlers
     window._cpmCopilot = actions;
+
+    // ==========================================
+    // CSP-SAFE EVENT DELEGATION
+    // Handles data-action clicks for both the settings tab and dialogs.
+    // ==========================================
+    const DELEGATED_ACTIONS = new Set(['generate', 'verify', 'remove', 'models', 'quota', 'autoConfig', 'copyToken', 'manualSave']);
+
+    document.addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-action]');
+        if (!btn) return;
+        const action = btn.dataset.action;
+
+        if (action === 'close-dialog') {
+            const id = btn.dataset.dialogId;
+            document.getElementById(id)?.remove();
+            return;
+        }
+
+        if (action === 'copy-code') {
+            const codeId = btn.dataset.codeId;
+            const text = document.getElementById(codeId)?.textContent ?? '';
+            navigator.clipboard.writeText(text).then(() => {});
+            return;
+        }
+
+        if (DELEGATED_ACTIONS.has(action) && typeof actions[action] === 'function') {
+            actions[action]();
+            return;
+        }
+    }, true);
 
     // ==========================================
     // REGISTER AS SETTINGS TAB (appears in sidebar)
@@ -886,7 +929,7 @@
                         <label class="block text-sm font-medium text-gray-400 mb-2">현재 저장된 토큰</label>
                         <div class="flex items-center space-x-2">
                             <div id="${PREFIX}-token-display" class="flex-1 bg-gray-800 border border-gray-600 rounded px-3 py-2 text-gray-300 font-mono text-sm select-all truncate">${escapeHtml(masked)}</div>
-                            <button onclick="window._cpmCopilot.copyToken()" class="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded text-sm font-bold shrink-0" title="토큰 복사">📋 복사</button>
+                            <button data-action="copyToken" class="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded text-sm font-bold shrink-0" title="토큰 복사">📋 복사</button>
                         </div>
                     </div>
 
@@ -895,29 +938,29 @@
                         <label class="block text-sm font-medium text-gray-400 mb-2">토큰 직접 입력</label>
                         <div class="flex items-center space-x-2">
                             <input id="${PREFIX}-manual-input" type="text" placeholder="ghu_xxxx 또는 gho_xxxx 토큰을 붙여넣기..." class="flex-1 bg-gray-800 border border-gray-600 rounded px-3 py-2 text-gray-200 font-mono text-sm focus:border-blue-500 focus:outline-none" />
-                            <button onclick="window._cpmCopilot.manualSave()" class="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded text-sm font-bold shrink-0">💾 저장</button>
+                            <button data-action="manualSave" class="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded text-sm font-bold shrink-0">💾 저장</button>
                         </div>
                         <p class="text-gray-500 text-xs mt-1">GitHub에서 직접 발급받은 토큰을 수동으로 입력할 수 있습니다.</p>
                     </div>
 
                     <!-- Action Buttons Grid -->
                     <div class="grid grid-cols-2 md:grid-cols-3 gap-3 mb-6">
-                        <button onclick="window._cpmCopilot.generate()" class="${BTN_CLASS}">
+                        <button data-action="generate" class="${BTN_CLASS}">
                             <span class="text-2xl mb-1">🔑</span><span>토큰 생성</span>
                         </button>
-                        <button onclick="window._cpmCopilot.verify()" class="${BTN_CLASS}">
+                        <button data-action="verify" class="${BTN_CLASS}">
                             <span class="text-2xl mb-1">✅</span><span>토큰 확인</span>
                         </button>
-                        <button onclick="window._cpmCopilot.remove()" class="${BTN_RED_CLASS}">
+                        <button data-action="remove" class="${BTN_RED_CLASS}">
                             <span class="text-2xl mb-1">🗑️</span><span>토큰 제거</span>
                         </button>
-                        <button onclick="window._cpmCopilot.models()" class="${BTN_CLASS}">
+                        <button data-action="models" class="${BTN_CLASS}">
                             <span class="text-2xl mb-1">📋</span><span>모델 목록</span>
                         </button>
-                        <button onclick="window._cpmCopilot.quota()" class="${BTN_CLASS}">
+                        <button data-action="quota" class="${BTN_CLASS}">
                             <span class="text-2xl mb-1">📊</span><span>할당량 확인</span>
                         </button>
-                        <button onclick="window._cpmCopilot.autoConfig()" class="${BTN_CLASS}">
+                        <button data-action="autoConfig" class="${BTN_CLASS}">
                             <span class="text-2xl mb-1">⚙️</span><span>자동 설정</span>
                         </button>
                     </div>

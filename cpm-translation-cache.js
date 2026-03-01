@@ -302,6 +302,58 @@
     const api = {};
     window._cpmTransCache = api;
 
+    // ==========================================
+    // CSP-compliant Event Delegation
+    // ==========================================
+    // Handles click on [data-action], change on [data-action="toggleDisplay"],
+    // and keydown on [data-action-keydown].
+    function _delegateClick(e) {
+        const btn = e.target.closest('[data-action]');
+        if (!btn) return;
+        const action = btn.getAttribute('data-action');
+        const argStr = btn.getAttribute('data-arg');
+        // toggleDisplay is handled by _delegateChange (change event on checkbox)
+        if (!action || action === 'toggleDisplay' || typeof api[action] !== 'function') return;
+        // Parse arg: number if numeric string, else string as-is
+        if (argStr !== null) {
+            const num = Number(argStr);
+            api[action](isNaN(num) ? argStr : num);
+        } else {
+            api[action]();
+        }
+    }
+
+    function _delegateChange(e) {
+        const el = e.target;
+        if (!el) return;
+        const action = el.getAttribute('data-action');
+        if (action === 'toggleDisplay' && typeof api.toggleDisplay === 'function') {
+            api.toggleDisplay(el);
+        }
+    }
+
+    function _delegateKeydown(e) {
+        const el = e.target;
+        if (!el) return;
+        const action = el.getAttribute('data-action-keydown');
+        if (action && typeof api[action] === 'function') {
+            api[action](e);
+        }
+    }
+
+    document.addEventListener('click', _delegateClick);
+    document.addEventListener('change', _delegateChange);
+    document.addEventListener('keydown', _delegateKeydown);
+
+    // Remove delegation listeners on hot-reload
+    const _prevCleanup = window._cpmTransCacheCleanup;
+    window._cpmTransCacheCleanup = () => {
+        document.removeEventListener('click', _delegateClick);
+        document.removeEventListener('change', _delegateChange);
+        document.removeEventListener('keydown', _delegateKeydown);
+        if (_prevCleanup) try { _prevCleanup(); } catch (e) { /* ignore */ }
+    };
+
     // State
     let _searchResults = [];
     let _unsortedResults = [];
@@ -347,9 +399,9 @@
             <div class="flex items-center justify-between mb-3">
                 <span class="text-sm text-gray-400">총 <strong class="text-blue-300">${total}</strong>건 (${start + 1}~${end})</span>
                 <div class="flex items-center space-x-2">
-                    ${page > 0 ? `<button onclick="window._cpmTransCache.goPage(${page - 1})" class="px-3 py-1 bg-gray-700 hover:bg-gray-600 text-white rounded text-xs">◀ 이전</button>` : ''}
+                    ${page > 0 ? `<button data-action="goPage" data-arg="${page - 1}" class="px-3 py-1 bg-gray-700 hover:bg-gray-600 text-white rounded text-xs">◀ 이전</button>` : ''}
                     <span class="text-xs text-gray-500">${page + 1}/${totalPages}</span>
-                    ${end < total ? `<button onclick="window._cpmTransCache.goPage(${page + 1})" class="px-3 py-1 bg-gray-700 hover:bg-gray-600 text-white rounded text-xs">다음 ▶</button>` : ''}
+                    ${end < total ? `<button data-action="goPage" data-arg="${page + 1}" class="px-3 py-1 bg-gray-700 hover:bg-gray-600 text-white rounded text-xs">다음 ▶</button>` : ''}
                 </div>
             </div>
         `;
@@ -360,8 +412,8 @@
             html += `
                 <div class="flex items-center gap-2 mb-3">
                     <span class="text-xs text-gray-500">정렬:</span>
-                    <button onclick="window._cpmTransCache.sortBy('default')" class="px-3 py-1 ${defCls} rounded text-xs font-medium">기본 (사전순)</button>
-                    <button onclick="window._cpmTransCache.sortBy('recent')" class="px-3 py-1 ${recCls} rounded text-xs font-medium">🕐 최신 번역순</button>
+                    <button data-action="sortBy" data-arg="default" class="px-3 py-1 ${defCls} rounded text-xs font-medium">기본 (사전순)</button>
+                    <button data-action="sortBy" data-arg="recent" class="px-3 py-1 ${recCls} rounded text-xs font-medium">🕐 최신 번역순</button>
                 </div>
             `;
         }
@@ -391,9 +443,9 @@
                             <div class="text-sm ${correction ? 'text-yellow-300' : 'text-green-300'} break-words font-mono leading-relaxed">${valPreview}</div>
                         </div>
                         <div class="flex flex-col gap-1 shrink-0">
-                            <button onclick="window._cpmTransCache.viewEntry(${i})" class="px-2 py-1 bg-gray-700 hover:bg-blue-600 text-white rounded text-xs" title="상세">🔍</button>
-                            <button onclick="window._cpmTransCache.editEntry(${i})" class="px-2 py-1 bg-gray-700 hover:bg-yellow-600 text-white rounded text-xs" title="수정">✏️</button>
-                            ${correction ? `<button onclick="window._cpmTransCache.revertEntry(${i})" class="px-2 py-1 bg-gray-700 hover:bg-orange-600 text-white rounded text-xs" title="수정 되돌리기">↩️</button>` : ''}
+                            <button data-action="viewEntry" data-arg="${i}" class="px-2 py-1 bg-gray-700 hover:bg-blue-600 text-white rounded text-xs" title="상세">🔍</button>
+                            <button data-action="editEntry" data-arg="${i}" class="px-2 py-1 bg-gray-700 hover:bg-yellow-600 text-white rounded text-xs" title="수정">✏️</button>
+                            ${correction ? `<button data-action="revertEntry" data-arg="${i}" class="px-2 py-1 bg-gray-700 hover:bg-orange-600 text-white rounded text-xs" title="수정 되돌리기">↩️</button>` : ''}
                         </div>
                     </div>
                 </div>
@@ -405,9 +457,9 @@
         if (totalPages > 1) {
             html += `
                 <div class="flex items-center justify-center mt-3 space-x-2">
-                    ${page > 0 ? `<button onclick="window._cpmTransCache.goPage(${page - 1})" class="px-3 py-1 bg-gray-700 hover:bg-gray-600 text-white rounded text-xs">◀ 이전</button>` : ''}
+                    ${page > 0 ? `<button data-action="goPage" data-arg="${page - 1}" class="px-3 py-1 bg-gray-700 hover:bg-gray-600 text-white rounded text-xs">◀ 이전</button>` : ''}
                     <span class="text-xs text-gray-500">${page + 1}/${totalPages}</span>
-                    ${end < total ? `<button onclick="window._cpmTransCache.goPage(${page + 1})" class="px-3 py-1 bg-gray-700 hover:bg-gray-600 text-white rounded text-xs">다음 ▶</button>` : ''}
+                    ${end < total ? `<button data-action="goPage" data-arg="${page + 1}" class="px-3 py-1 bg-gray-700 hover:bg-gray-600 text-white rounded text-xs">다음 ▶</button>` : ''}
                 </div>
             `;
         }
@@ -521,7 +573,7 @@
             <div class="bg-gray-800 border border-gray-700 rounded-lg p-4">
                 <div class="flex items-center justify-between mb-3">
                     <h4 class="text-blue-300 font-bold text-sm">📄 캐시 항목 상세</h4>
-                    <button onclick="window._cpmTransCache.goPage(${_currentPage})" class="px-3 py-1 bg-gray-700 hover:bg-gray-600 text-white rounded text-xs">← 목록으로</button>
+                    <button data-action="goPage" data-arg="${_currentPage}" class="px-3 py-1 bg-gray-700 hover:bg-gray-600 text-white rounded text-xs">← 목록으로</button>
                 </div>
                 <div class="mb-3">
                     <div class="text-xs text-gray-500 mb-1">원문 (Key)</div>
@@ -533,8 +585,8 @@
                     <div class="bg-gray-900 border border-gray-600 rounded p-3 text-sm ${correction ? 'text-yellow-300' : 'text-green-300'} font-mono whitespace-pre-wrap break-words max-h-60 overflow-y-auto">${escapeHtml(displayValue)}</div>
                 </div>
                 <div class="flex gap-2 mt-4">
-                    <button onclick="window._cpmTransCache.editEntry(${idx})" class="px-4 py-2 bg-yellow-600 hover:bg-yellow-500 text-white rounded text-sm font-bold">✏️ 수정</button>
-                    ${correction ? `<button onclick="window._cpmTransCache.revertEntry(${idx})" class="px-4 py-2 bg-orange-600 hover:bg-orange-500 text-white rounded text-sm font-bold">↩️ 수정 되돌리기</button>` : ''}
+                    <button data-action="editEntry" data-arg="${idx}" class="px-4 py-2 bg-yellow-600 hover:bg-yellow-500 text-white rounded text-sm font-bold">✏️ 수정</button>
+                    ${correction ? `<button data-action="revertEntry" data-arg="${idx}" class="px-4 py-2 bg-orange-600 hover:bg-orange-500 text-white rounded text-sm font-bold">↩️ 수정 되돌리기</button>` : ''}
                 </div>
             </div>
         `);
@@ -551,7 +603,7 @@
             <div class="bg-gray-800 border border-yellow-600 rounded-lg p-4">
                 <div class="flex items-center justify-between mb-3">
                     <h4 class="text-yellow-300 font-bold text-sm">✏️ 번역 수정</h4>
-                    <button onclick="window._cpmTransCache.goPage(${_currentPage})" class="px-3 py-1 bg-gray-700 hover:bg-gray-600 text-white rounded text-xs">← 취소</button>
+                    <button data-action="goPage" data-arg="${_currentPage}" class="px-3 py-1 bg-gray-700 hover:bg-gray-600 text-white rounded text-xs">← 취소</button>
                 </div>
                 <div class="mb-3">
                     <div class="text-xs text-gray-500 mb-1">원문 (Key)</div>
@@ -567,8 +619,8 @@
                 </div>
                 <p class="text-xs text-gray-500 mb-3">💡 수정 내용은 사용자 수정 사전에 저장되며, 표시 시 자동으로 적용됩니다.</p>
                 <div class="flex gap-2">
-                    <button onclick="window._cpmTransCache.saveEdit(${idx})" class="px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded text-sm font-bold">💾 저장</button>
-                    <button onclick="window._cpmTransCache.goPage(${_currentPage})" class="px-4 py-2 bg-gray-600 hover:bg-gray-500 text-white rounded text-sm font-bold">취소</button>
+                    <button data-action="saveEdit" data-arg="${idx}" class="px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded text-sm font-bold">💾 저장</button>
+                    <button data-action="goPage" data-arg="${_currentPage}" class="px-4 py-2 bg-gray-600 hover:bg-gray-500 text-white rounded text-sm font-bold">취소</button>
                 </div>
             </div>
         `);
@@ -804,8 +856,8 @@
                 </div>
                 <p class="text-xs text-gray-500 mb-3">💡 수정 사전에 추가됩니다. 해당 원문의 캐시 번역이 있으면 이 값으로 대체됩니다.</p>
                 <div class="flex gap-2">
-                    <button onclick="window._cpmTransCache.saveNewEntry()" class="px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded text-sm font-bold">💾 추가</button>
-                    <button onclick="window._cpmTransCache.goPage(${_currentPage})" class="px-4 py-2 bg-gray-600 hover:bg-gray-500 text-white rounded text-sm font-bold">취소</button>
+                    <button data-action="saveNewEntry" class="px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded text-sm font-bold">💾 추가</button>
+                    <button data-action="goPage" data-arg="${_currentPage}" class="px-4 py-2 bg-gray-600 hover:bg-gray-500 text-white rounded text-sm font-bold">취소</button>
                 </div>
             </div>
         `);
@@ -914,7 +966,7 @@
                     <div class="mb-4">
                         <label class="flex items-center space-x-2 text-sm font-medium text-gray-300">
                             <input id="${PREFIX}-display-toggle" type="checkbox" ${displayChecked}
-                                   onchange="window._cpmTransCache.toggleDisplay(this)"
+                                   data-action="toggleDisplay"
                                    class="form-checkbox text-blue-500 rounded bg-gray-800 border-gray-600 focus:ring-blue-500">
                             <span>수정 사전 자동 적용 (채팅 표시 시 번역 교정)</span>
                         </label>
@@ -927,7 +979,7 @@
                                 <span class="text-sm text-gray-400">RisuAI 번역 캐시:</span>
                                 <span id="${PREFIX}-cache-count" class="text-sm font-bold text-blue-300 ml-2">${cacheCount}</span>
                             </div>
-                            <button onclick="window._cpmTransCache.refreshCount()" class="px-3 py-1 bg-gray-700 hover:bg-gray-600 text-white rounded text-xs" title="새로고침">🔄</button>
+                            <button data-action="refreshCount" class="px-3 py-1 bg-gray-700 hover:bg-gray-600 text-white rounded text-xs" title="새로고침">🔄</button>
                         </div>
                         <div>
                             <span class="text-sm text-gray-400">사용자 수정 사전:</span>
@@ -941,36 +993,36 @@
                         <div class="flex items-center space-x-2">
                             <input id="${PREFIX}-search-input" type="text" placeholder="검색어를 입력하세요..."
                                    class="flex-1 bg-gray-800 border border-gray-600 rounded px-3 py-2 text-gray-200 text-sm focus:border-blue-500 focus:outline-none"
-                                   onkeydown="window._cpmTransCache.onSearchKeydown(event)" />
-                            <button onclick="window._cpmTransCache.search()" class="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded text-sm font-bold shrink-0">🔍 검색</button>
+                                   data-action-keydown="onSearchKeydown" />
+                            <button data-action="search" class="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded text-sm font-bold shrink-0">🔍 검색</button>
                         </div>
                     </div>
 
                     <!-- Action Buttons -->
                     <div class="grid grid-cols-2 md:grid-cols-3 gap-3 mb-3">
-                        <button onclick="window._cpmTransCache.browseAll()" class="${BTN_CLASS}" ${!canSearchCache ? 'disabled title="API 미지원"' : ''}>
+                        <button data-action="browseAll" class="${BTN_CLASS}" ${!canSearchCache ? 'disabled title="API 미지원"' : ''}>
                             <span class="text-2xl mb-1">📋</span><span>캐시 전체 보기</span>
                         </button>
-                        <button onclick="window._cpmTransCache.browseCorrections()" class="${BTN_WARN_CLASS}">
+                        <button data-action="browseCorrections" class="${BTN_WARN_CLASS}">
                             <span class="text-2xl mb-1">📝</span><span>수정 사전 보기</span>
                         </button>
-                        <button onclick="window._cpmTransCache.showAddForm()" class="${BTN_CLASS}">
+                        <button data-action="showAddForm" class="${BTN_CLASS}">
                             <span class="text-2xl mb-1">➕</span><span>수동 추가</span>
                         </button>
                     </div>
                     <div class="grid grid-cols-2 md:grid-cols-3 gap-3 mb-6">
-                        <button onclick="window._cpmTransCache.exportCache()" class="${BTN_CLASS}">
+                        <button data-action="exportCache" class="${BTN_CLASS}">
                             <span class="text-2xl mb-1">📤</span><span>전체 내보내기</span>
                         </button>
-                        <button onclick="window._cpmTransCache.exportCorrections()" class="${BTN_WARN_CLASS}">
+                        <button data-action="exportCorrections" class="${BTN_WARN_CLASS}">
                             <span class="text-2xl mb-1">📤</span><span>수정 사전 내보내기</span>
                         </button>
-                        <button onclick="window._cpmTransCache.importCache()" class="${BTN_CLASS}">
+                        <button data-action="importCache" class="${BTN_CLASS}">
                             <span class="text-2xl mb-1">📥</span><span>가져오기</span>
                         </button>
                     </div>
                     <div class="grid grid-cols-1 gap-3 mb-6">
-                        <button onclick="window._cpmTransCache.clearCorrections()" class="${BTN_RED_CLASS}">
+                        <button data-action="clearCorrections" class="${BTN_RED_CLASS}">
                             <span class="text-lg">🗑️ 수정 사전 전체 삭제</span>
                         </button>
                     </div>
