@@ -1,5 +1,5 @@
 //@name CPM Provider - AWS Bedrock
-//@version 1.4.3
+//@version 1.5.0
 //@description AWS Bedrock (Claude) provider for Cupcake PM (Streaming)
 //@icon 🔶
 //@update-url https://raw.githubusercontent.com/ruyari-cupcake/cupcake-plugin-manager/main/cpm-provider-aws.js
@@ -7,6 +7,81 @@
 (() => {
     const CPM = window.CupcakePM;
     if (!CPM) { console.error('[CPM-AWS] CupcakePM API not found!'); return; }
+    const Risu = window.Risuai || window.risuai;
+
+    /**
+     * AWS-specific smart fetch: prefers risuFetch (full response collection) over
+     * nativeFetch (streaming ReadableStream via IPC — can fail in some environments).
+     *
+     * Unlike the general smartNativeFetch in provider-manager, this does NOT sanitize
+     * or reconstruct the body. AWS V4 signed requests depend on exact body bytes.
+     * We pass the original body *object* to risuFetch so the host can JSON.stringify
+     * it identically to what the signer hashed.
+     *
+     * @param {string|URL} signedUrl  - Signed URL from AwsV4Signer
+     * @param {string}     signedMethod - HTTP method
+     * @param {Headers|Object} signedHeaders - Signed headers
+     * @param {string|null} signedBody - Stringified body (used for nativeFetch fallback)
+     * @param {Object|undefined} bodyObj - Original body object (used for risuFetch)
+     * @returns {Promise<Response>}
+     */
+    async function _awsSmartFetch(signedUrl, signedMethod, signedHeaders, signedBody, bodyObj) {
+        const url = typeof signedUrl === 'string' ? signedUrl : signedUrl.toString();
+
+        // Strategy 1: risuFetch — collects full response on host, returns non-streaming data.
+        if (typeof Risu?.risuFetch === 'function') {
+            try {
+                // Convert Headers to plain object for postMessage serialization
+                const hdrs = {};
+                if (signedHeaders) {
+                    if (typeof signedHeaders.forEach === 'function') {
+                        signedHeaders.forEach((v, k) => { hdrs[k] = v; });
+                    } else {
+                        Object.assign(hdrs, signedHeaders);
+                    }
+                }
+
+                const result = await Risu.risuFetch(url, {
+                    method: signedMethod || 'GET',
+                    headers: hdrs,
+                    body: bodyObj,   // Original object (or undefined for GET)
+                    rawResponse: true,
+                    plainFetchForce: true,
+                });
+
+                if (result && result.data != null) {
+                    let responseBody = null;
+                    if (result.data instanceof Uint8Array) {
+                        responseBody = result.data;
+                    } else if (ArrayBuffer.isView(result.data) || result.data instanceof ArrayBuffer) {
+                        responseBody = new Uint8Array(
+                            result.data instanceof ArrayBuffer ? result.data : result.data.buffer
+                        );
+                    } else if (Array.isArray(result.data)) {
+                        responseBody = new Uint8Array(result.data);
+                    } else if (typeof result.data === 'string' && result.status && result.status !== 0) {
+                        responseBody = new TextEncoder().encode(result.data);
+                    }
+
+                    if (responseBody) {
+                        console.log(`[CPM-AWS] risuFetch OK: status=${result.status} ${url.substring(0, 60)}`);
+                        return new Response(responseBody, {
+                            status: result.status || 200,
+                            headers: new Headers(result.headers || {})
+                        });
+                    }
+                }
+                console.log(`[CPM-AWS] risuFetch returned no usable data, falling back to nativeFetch`);
+            } catch (e) {
+                console.warn(`[CPM-AWS] risuFetch error: ${e.message}, falling back to nativeFetch`);
+            }
+        }
+
+        // Strategy 2: nativeFetch (streaming) — last resort
+        const nfOpts = { method: signedMethod, headers: signedHeaders };
+        if (signedBody) nfOpts.body = signedBody;
+        return await Risu.nativeFetch(url, nfOpts);
+    }
 
     const AWS_MODELS = [
         { uniqueId: 'aws-us.anthropic.claude-opus-4-6-v1', id: 'us.anthropic.claude-opus-4-6-v1', name: 'Claude 4.6 Opus' },
@@ -43,10 +118,7 @@
                     region: region,
                 });
                 const signed = await signer.sign();
-                const res = await Risuai.nativeFetch(signed.url.toString(), {
-                    method: signed.method,
-                    headers: signed.headers,
-                });
+                const res = await _awsSmartFetch(signed.url, signed.method, signed.headers, null, undefined);
                 if (!res.ok) return null;
 
                 const data = await res.json();
@@ -86,10 +158,7 @@
                         region: region,
                     });
                     const profileSigned = await profileSigner.sign();
-                    const profileRes = await Risuai.nativeFetch(profileSigned.url.toString(), {
-                        method: profileSigned.method,
-                        headers: profileSigned.headers,
-                    });
+                    const profileRes = await _awsSmartFetch(profileSigned.url, profileSigned.method, profileSigned.headers, null, undefined);
                     if (profileRes.ok) {
                         const profileData = await profileRes.json();
                         const profiles = profileData.inferenceProfileSummaries || [];
@@ -116,7 +185,10 @@
             }
         },
         fetcher: async function (modelDef, messages, temp, maxTokens, args, abortSignal) {
-            const streamingEnabled = await CPM.safeGetBoolArg('cpm_streaming_enabled', false);
+            // AWS Bedrock streaming uses application/vnd.amazon.eventstream binary protocol
+            // which cannot be reliably parsed in the V3 plugin sandbox (text-based split/regex fails).
+            // Force non-streaming (invoke endpoint) for all AWS models.
+            const streamingEnabled = false;
             const config = {
                 key: await CPM.safeGetArg('cpm_aws_key'),
                 secret: await CPM.safeGetArg('cpm_aws_secret'),
@@ -173,11 +245,7 @@
                         headers: { 'Content-Type': 'application/json', 'accept': 'application/json' }
                     });
                     const signed = await signer.sign();
-                    const res = await Risuai.nativeFetch(signed.url.toString(), {
-                        method: signed.method,
-                        headers: signed.headers,
-                        body: signed.body
-                    });
+                    const res = await _awsSmartFetch(signed.url, signed.method, signed.headers, signed.body, body);
                     if (!res.ok) return { success: false, content: `[AWS Bedrock Error ${res.status}] ${await res.text()}` };
                     const data = await res.json();
                     // Bedrock invoke returns Anthropic Messages API format
@@ -202,7 +270,7 @@
                 });
 
                 const signed = await signer.sign();
-                const res = await Risuai.nativeFetch(signed.url.toString(), {
+                const res = await Risu.nativeFetch(signed.url.toString(), {
                     method: signed.method,
                     headers: signed.headers,
                     body: signed.body

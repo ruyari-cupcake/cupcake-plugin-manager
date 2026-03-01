@@ -1,6 +1,6 @@
 //@name CPM Component - Chat Input Resizer
 //@display-name Cupcake UI Resizer
-//@version 0.2.0
+//@version 0.3.0
 //@author Cupcake
 //@update-url https://raw.githubusercontent.com/ruyari-cupcake/cupcake-plugin-manager/main/cpm-chat-resizer.js
 
@@ -14,6 +14,11 @@
 (async () => {
     // Note: We intentionally don't block the entire script execution here,
     // because RisuAI V3 hot-reloading needs to re-evaluate the event listeners.
+
+    // ── Hot-reload cleanup: tear down previous instance ──
+    if (typeof window._cpmResizerCleanup === 'function') {
+        try { await window._cpmResizerCleanup(); } catch (_) {}
+    }
 
     if (!window.Risuai && !window.risuai) {
         console.warn('[CPM Resizer] RisuAI API variable missing. Halting plugin.');
@@ -119,7 +124,7 @@
         // 2. CSS ATTRIBUTE INJECTION
         // ==========================================
         const styleId = 'cpm-maximizer-styles';
-        if (!(await rootDoc.getElementById(styleId))) {
+        if (!(await rootDoc.querySelector(`[x-id="${styleId}"]`))) {
             const styleEl = await rootDoc.createElement('style');
             await styleEl.setAttribute('x-id', styleId);
             // We use [x-cpm-maximized] to trigger the massive detached overlay
@@ -257,18 +262,48 @@
             }
         };
 
-        // Scan for unprocessed textareas one-by-one via querySelector
-        // NOTE: querySelectorAll returns SafeElement[] which does NOT survive
-        // the iframe RPC bridge (arrays of REMOTE_REQUIRED objects lose their
-        // private fields during structured clone). querySelector (singular)
-        // returns a single SafeElement that gets properly serialized.
-        const scanExistingTextareas = async () => {
-            let limit = 0;
-            while (limit < 100) {
-                limit++;
-                const ta = await rootDoc.querySelector('textarea:not([x-cpm-resizer])');
-                if (!ta) break;
+        // ==========================================
+        // 3. LAZY INITIALIZATION VIA EVENT DELEGATION
+        // ==========================================
+        // V3 SafeElement only allows specific event types (click, pointer*, mouse*,
+        // scroll, key*). `focusin` is NOT allowed and throws an error.
+        // We use `pointerdown` delegation + MutationObserver instead.
+        // When a user taps/clicks any textarea, we lazily attach the button.
+
+        const handlePointerDown = async (e) => {
+            if (isResizerEnabled === false) return;
+            try {
+                // V3 SafeElement proxy: tagName is not a property, use async nodeName()
+                let tagName = '';
+                if (e && e.target) {
+                    try { tagName = (typeof e.target.nodeName === 'function') ? await e.target.nodeName() : (e.target.tagName || ''); } catch (_) {}
+                }
+                if (!tagName || String(tagName).toLowerCase() !== 'textarea') return;
+
+                const ta = e.target;
+                if (!ta) return;
+
+                // Try to read the marker attribute — if it's already set, skip
+                let marker = null;
+                try { marker = await ta.getAttribute('x-cpm-resizer'); } catch (_) { return; }
+                if (marker) return; // Already processed
+
                 await attachButtonToTextarea(ta);
+            } catch (err) {
+                // Silently ignore — pointerdown may fire on non-SafeElement targets
+            }
+        };
+
+        // Single initial scan: process at most a small batch to avoid blocking.
+        // Remaining textareas will be lazily initialized on click/tap or MutationObserver.
+        const initialScan = async () => {
+            // Process up to 5 textareas on initial load to cover visible ones
+            for (let i = 0; i < 5; i++) {
+                try {
+                    const ta = await rootDoc.querySelector('textarea:not([x-cpm-resizer])');
+                    if (!ta) break;
+                    await attachButtonToTextarea(ta);
+                } catch (_) { break; }
             }
         };
 
@@ -283,33 +318,66 @@
                 return;
             }
 
-            // Initial scan for textareas already in the DOM
-            await scanExistingTextareas();
-
-            // Set up MutationObserver via RisuAI V3 API
             const body = await rootDoc.querySelector('body');
             if (!body) {
                 console.warn('[CPM Resizer] Could not find body element.');
                 return;
             }
 
+            // === MutationObserver (PRIMARY mechanism) ===
+            // Scans for new unprocessed textareas whenever DOM changes.
+            // Debounced to 400ms. Processes up to 3 textareas per trigger
+            // to handle batch renders (e.g., opening a character editor).
             let scanPending = false;
-
-            const observer = await risuai.createMutationObserver(async (/* mutations - unusable through iframe RPC bridge */) => {
-                // NOTE: MutationObserver callback args (SafeClassArray) don't survive
-                // the iframe postMessage bridge — private fields are lost during structured clone.
-                // Instead, we use the callback purely as a "DOM changed" trigger with debounce.
+            const observer = await risuai.createMutationObserver(async () => {
                 if (isResizerEnabled === false) return;
                 if (scanPending) return;
                 scanPending = true;
                 setTimeout(async () => {
                     scanPending = false;
-                    await scanExistingTextareas().catch(() => {});
-                }, 200);
+                    try {
+                        for (let i = 0; i < 3; i++) {
+                            const ta = await rootDoc.querySelector('textarea:not([x-cpm-resizer])');
+                            if (!ta) break;
+                            await attachButtonToTextarea(ta);
+                        }
+                    } catch (_) {}
+                }, 400);
             });
-
             await observer.observe(body, { childList: true, subtree: true });
-            console.log('[CPM Resizer] MutationObserver active on body.');
+            window._cpmResizerObserver = observer;
+            console.log('[CPM Resizer] MutationObserver active (primary).');
+
+            // === pointerdown delegation (BACKUP for lazy init) ===
+            // When user taps/clicks a textarea, attach button if not yet processed.
+            // pointerdown IS in the SafeElement allowed event list (unlike focusin).
+            if (window._cpmResizerPointerListenerId) {
+                try { await body.removeEventListener('pointerdown', window._cpmResizerPointerListenerId); } catch (_) {}
+            }
+            try {
+                window._cpmResizerPointerListenerId = await body.addEventListener('pointerdown', handlePointerDown);
+                console.log('[CPM Resizer] pointerdown delegation active (backup).');
+            } catch (evtErr) {
+                console.warn('[CPM Resizer] pointerdown listener failed:', evtErr.message);
+            }
+
+            // Small initial scan for textareas already visible
+            await initialScan();
+        };
+
+        // Cleanup function for hot-reload
+        window._cpmResizerCleanup = async () => {
+            try {
+                const body = await rootDoc.querySelector('body');
+                if (body && window._cpmResizerPointerListenerId) {
+                    await body.removeEventListener('pointerdown', window._cpmResizerPointerListenerId);
+                }
+            } catch (_) {}
+            window._cpmResizerPointerListenerId = null;
+            if (window._cpmResizerObserver) {
+                try { await window._cpmResizerObserver.disconnect(); } catch (_) {}
+                window._cpmResizerObserver = null;
+            }
         };
 
         await initResizer();

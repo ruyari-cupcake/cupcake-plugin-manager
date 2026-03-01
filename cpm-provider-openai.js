@@ -1,5 +1,5 @@
 //@name CPM Provider - OpenAI
-//@version 1.5.3
+//@version 1.5.4
 //@description OpenAI provider for Cupcake PM (Streaming, Key Rotation)
 //@icon 🟢
 //@update-url https://raw.githubusercontent.com/ruyari-cupcake/cupcake-plugin-manager/main/cpm-provider-openai.js
@@ -73,6 +73,7 @@
                 reasoning: await CPM.safeGetArg('cpm_openai_reasoning'),
                 verbosity: await CPM.safeGetArg('cpm_openai_verbosity'),
                 servicetier: await CPM.safeGetArg('common_openai_servicetier'),
+                promptCacheRetention: await CPM.safeGetArg('cpm_openai_prompt_cache_retention'),
             };
 
             // Helper: detect models that require max_completion_tokens instead of max_tokens
@@ -117,6 +118,12 @@
                     }
                 }
 
+                // OpenAI Prompt Cache Retention: 'in_memory' (default, 5-10min) or '24h' (extended)
+                // Supported on gpt-4.1, gpt-5, gpt-5.1, gpt-5.2 series
+                if (config.promptCacheRetention && config.promptCacheRetention !== 'none') {
+                    body.prompt_cache_retention = config.promptCacheRetention;
+                }
+
                 if (config.reasoning && config.reasoning !== 'none') { body.reasoning_effort = config.reasoning; delete body.temperature; }
                 if (config.verbosity && config.verbosity !== 'none') body.verbosity = config.verbosity;
 
@@ -132,12 +139,12 @@
                         headers['Authorization'] = `Bearer ${copilotApiToken}`;
                     }
                     headers['Copilot-Integration-Id'] = 'vscode-chat';
-                    headers['X-Request-Id'] = crypto.randomUUID ? crypto.randomUUID() : Date.now().toString();
+                    headers['X-Request-Id'] = (typeof CPM.safeUUID === 'function') ? CPM.safeUUID() : ('xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) { var r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16); }));
                 }
 
                 const safeBody = JSON.stringify(body);
 
-                const fetchFn = typeof CPM.smartNativeFetch === 'function' ? CPM.smartNativeFetch : Risuai.nativeFetch;
+                const fetchFn = typeof CPM.smartNativeFetch === 'function' ? CPM.smartNativeFetch : (window.Risuai || window.risuai).nativeFetch;
                 const res = await fetchFn(url, { method: 'POST', headers, body: safeBody });
                 if (!res.ok) return { success: false, content: `[OpenAI Error ${res.status}] ${await res.text()}`, _status: res.status };
 
@@ -160,7 +167,7 @@
             id: 'tab-openai',
             icon: '🟢',
             label: 'OpenAI',
-            exportKeys: ['cpm_openai_key', 'cpm_openai_reasoning', 'cpm_openai_verbosity', 'common_openai_servicetier', 'cpm_openai_url', 'cpm_dynamic_openai'],
+            exportKeys: ['cpm_openai_key', 'cpm_openai_reasoning', 'cpm_openai_verbosity', 'common_openai_servicetier', 'cpm_openai_prompt_cache_retention', 'cpm_openai_url', 'cpm_dynamic_openai'],
             renderContent: async (renderInput, lists) => {
                 return `
                     <h3 class="text-3xl font-bold text-green-400 mb-6 pb-3 border-b border-gray-700">OpenAI Configuration (설정)</h3>
@@ -169,6 +176,7 @@
                     ${await renderInput('cpm_openai_reasoning', 'Reasoning Effort (추론 수준 - o3, o1 series)', 'select', lists.reasoningList)}
                     ${await renderInput('cpm_openai_verbosity', 'Response Verbosity (응답 상세)', 'select', lists.verbosityList)}
                     ${await renderInput('common_openai_servicetier', 'Service Tier (응답 속도)', 'select', [{ value: '', text: 'Auto (자동)' }, { value: 'flex', text: 'Flex' }, { value: 'default', text: 'Default' }])}
+                    ${await renderInput('cpm_openai_prompt_cache_retention', 'Prompt Cache Retention (프롬프트 캐시 유지)', 'select', [{ value: 'none', text: 'None (기본, 서버 자동 5~10분)' }, { value: 'in_memory', text: 'In-Memory (5~10분, 최대 1시간)' }, { value: '24h', text: '24h Extended (24시간 확장 캐시)' }])}
                     ${await renderInput('cpm_openai_url', 'Custom Base URL (커스텀 API 주소 - 선택사항)')}
                 `;
             }

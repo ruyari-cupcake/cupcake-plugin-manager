@@ -1,6 +1,6 @@
 //@name CPM Component - Chat Navigation
 //@display-name 🧁 Cupcake Navigation
-//@version 2.1.0
+//@version 2.1.1
 //@description 채팅 메시지 네비게이션 (4버튼 → 2버튼 → 키보드 → OFF 순환)
 //@icon 🧭
 //@author Cupcake
@@ -28,6 +28,11 @@
         return;
     }
     const risuai = window.risuai || window.Risuai;
+
+    // ── Hot-reload cleanup: tear down ALL previous resources ──
+    if (typeof window._cpmNaviCleanup === 'function') {
+        try { await window._cpmNaviCleanup(); } catch (e) { console.warn(`${LOG_PREFIX} Previous cleanup error:`, e); }
+    }
 
     // ── State ──
     let rootDoc = null;
@@ -205,9 +210,14 @@
             if (!body) return;
             keyListenerId = await body.addEventListener('keydown', async (e) => {
                 try {
-                    const tag = (e && e.target && e.target.tagName) ? String(e.target.tagName).toLowerCase() : '';
+                    // V3 SafeElement proxy: use async nodeName() instead of sync tagName
+                    let tag = '';
+                    if (e && e.target) {
+                        try { tag = (typeof e.target.nodeName === 'function') ? String(await e.target.nodeName()).toLowerCase() : (e.target.tagName ? String(e.target.tagName).toLowerCase() : ''); } catch (_) {}
+                    }
                     if (tag === 'input' || tag === 'textarea') return;
-                    if (e.target && e.target.isContentEditable) return;
+                    // isContentEditable is not exposed on V3 SafeElement — skip check gracefully
+                    try { if (e.target && e.target.isContentEditable) return; } catch (_) {}
                 } catch (_) {}
 
                 switch (e.key) {
@@ -365,12 +375,20 @@
                 if (bottomBtnRef && await hitTest(bottomBtnRef, goToBottom)) return;
             });
 
-            // ── Drag Handler ──
+            // ── Drag Handler (pointer + touch fallback for mobile) ──
+            // Helper: extract coordinates from pointer, touch, or mouse events
+            const getEventXY = (e) => {
+                if (e.clientX !== undefined && e.clientY !== undefined) return { x: e.clientX, y: e.clientY };
+                const t = (e.touches && e.touches[0]) || (e.changedTouches && e.changedTouches[0]);
+                if (t) return { x: t.clientX, y: t.clientY };
+                return { x: undefined, y: undefined };
+            };
+
             try {
-                await container.addEventListener('pointerdown', async (e) => {
-                    if (e.button !== 0 && e.button !== -1) return;
-                    const cx = e.clientX;
-                    const cy = e.clientY;
+                const onDragStart = async (e) => {
+                    // pointer events have button, touch events don't
+                    if (e.button !== undefined && e.button !== 0 && e.button !== -1) return;
+                    const { x: cx, y: cy } = getEventXY(e);
                     if (cx === undefined || cy === undefined || !handleRef) return;
 
                     const handleRect = await handleRef.getBoundingClientRect();
@@ -386,31 +404,38 @@
 
                     await dragHandle.setStyle('backgroundColor', theme.handleActive);
 
+                    // Clean up previous listeners
                     if (globalPointerMoveId) await body.removeEventListener('pointermove', globalPointerMoveId);
                     if (globalPointerUpId) await body.removeEventListener('pointerup', globalPointerUpId);
 
-                    globalPointerMoveId = await body.addEventListener('pointermove', async (ev) => {
+                    const onDragMove = async (ev) => {
                         if (!isDragging || !widgetElement) return;
                         if (ev.preventDefault) ev.preventDefault();
-                        const newX = ev.clientX - dragShiftX;
-                        const newY = ev.clientY - dragShiftY;
+                        const { x: mx, y: my } = getEventXY(ev);
+                        if (mx === undefined || my === undefined) return;
+                        const newX = mx - dragShiftX;
+                        const newY = my - dragShiftY;
                         await widgetElement.setStyle('bottom', 'auto');
                         await widgetElement.setStyle('right', 'auto');
                         await widgetElement.setStyle('left', `${newX}px`);
                         await widgetElement.setStyle('top', `${newY}px`);
-                    });
+                    };
 
-                    globalPointerUpId = await body.addEventListener('pointerup', async () => {
+                    const onDragEnd = async () => {
                         if (isDragging) {
                             isDragging = false;
                             if (handleRef) await handleRef.setStyle('backgroundColor', theme.handle);
                         }
                         if (globalPointerMoveId) await body.removeEventListener('pointermove', globalPointerMoveId);
                         if (globalPointerUpId) await body.removeEventListener('pointerup', globalPointerUpId);
-                        globalPointerMoveId = null;
-                        globalPointerUpId = null;
-                    });
-                });
+                        globalPointerMoveId = globalPointerUpId = null;
+                    };
+
+                    globalPointerMoveId = await body.addEventListener('pointermove', onDragMove);
+                    globalPointerUpId = await body.addEventListener('pointerup', onDragEnd);
+                };
+
+                await container.addEventListener('pointerdown', onDragStart);
             } catch (dragErr) {
                 console.error(`${LOG_PREFIX} Drag setup error:`, dragErr);
             }
@@ -518,6 +543,26 @@
             if (found) isReady = true;
         }
     }, 3000);
+
+    // ── Hot-reload cleanup function ──
+    // Registered on window so the NEXT execution can call it to tear down
+    // all listeners, timers, observers, and DOM elements from THIS instance.
+    window._cpmNaviCleanup = async () => {
+        console.log(`${LOG_PREFIX} Cleanup: tearing down previous instance...`);
+        // 1. Clear setInterval
+        if (containerPollTimer) { clearInterval(containerPollTimer); containerPollTimer = null; }
+        if (observerTimer) { clearTimeout(observerTimer); observerTimer = null; }
+        // 2. Disconnect MutationObserver
+        if (domObserver) { try { await domObserver.disconnect(); } catch (_) {} domObserver = null; }
+        // 3. Remove keyboard listener
+        await disableKeyboard();
+        // 4. Destroy floating widget + its event listeners
+        await destroyWidget();
+        // 5. Reset state
+        isReady = false;
+        lastChatScreenState = null;
+        currentModeIndex = -1;
+    };
 
     console.log(`${LOG_PREFIX} 초기화 완료 (v2.1.0 모드 순환)`);
 })();

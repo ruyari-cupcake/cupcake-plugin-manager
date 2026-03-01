@@ -1,5 +1,5 @@
 //@name CPM Provider - Gemini Studio
-//@version 1.6.1
+//@version 1.6.2
 //@description Google Gemini Studio (API Key) provider for Cupcake PM (Streaming, Key Rotation)
 //@icon 🔵
 //@update-url https://raw.githubusercontent.com/ruyari-cupcake/cupcake-plugin-manager/main/cpm-provider-gemini.js
@@ -111,7 +111,7 @@
                     CPM.cleanExperimentalModelParams(body.generationConfig, model);
                 }
 
-                const fetchFn = typeof CPM.smartNativeFetch === 'function' ? CPM.smartNativeFetch : Risuai.nativeFetch;
+                const fetchFn = typeof CPM.smartNativeFetch === 'function' ? CPM.smartNativeFetch : (window.Risuai || window.risuai).nativeFetch;
                 const res = await fetchFn(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
                 if (!res.ok) return { success: false, content: `[Gemini Error ${res.status}] ${await res.text()}`, _status: res.status };
 

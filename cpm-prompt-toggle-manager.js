@@ -1,6 +1,6 @@
 // @name CPM Prompt Toggle Manager
 // @display-name ⚙️ PTM (프롬프트 토글 관리자) v3
-// @version 3.0.4
+// @version 3.0.5
 // @description CupcakePM 서브 플러그인 - 프롬프트 토글 설정을 프리셋으로 저장하고 관리합니다.
 // @icon ⚙️
 // @author Cupcake
@@ -223,22 +223,27 @@
                 const classes = span.className || '';
                 if (classes.includes('w-5') && classes.includes('h-5')) {
                     foundIndicator = true;
-                    isChecked = classes.includes('bg-darkborderc');
-                    if (debug) console.log(LOG_TAG, `[Parse] Label ${idx}: indicator classes="${classes}" → checked=${isChecked}`);
+                    // Primary: SVG checkmark presence inside indicator span = checked
+                    const hasSvg = span.querySelector('svg') !== null;
+                    // Secondary: bg-darkborderc class = checked (theme-specific fallback)
+                    const hasActiveClass = classes.includes('bg-darkborderc');
+                    isChecked = hasSvg || hasActiveClass;
+                    if (debug) console.log(LOG_TAG, `[Parse] Label ${idx}: indicator svg=${hasSvg} activeClass=${hasActiveClass} → checked=${isChecked}`);
                 } else if (span.textContent.trim() && !classes.includes('w-3')) {
                     // Label text span (exclude SVG-size spans like w-3 h-3)
                     toggleName = span.textContent.trim();
                 }
             }
 
-            if (!foundIndicator && debug) {
-                console.log(LOG_TAG, `[Parse] Label ${idx}: WARNING no indicator span (w-5 h-5) found`);
-                // Fallback: check for bg-darkborderc anywhere in label
-                const anyChecked = label.innerHTML.includes('bg-darkborderc');
-                if (anyChecked) {
-                    isChecked = true;
-                    if (debug) console.log(LOG_TAG, `[Parse] Label ${idx}: fallback innerHTML check → checked=true`);
-                }
+            if (!foundIndicator) {
+                // Fallback A: Check if the input element has "checked" attribute
+                const inputChecked = inputEl.hasAttribute('checked');
+                // Fallback B: SVG anywhere inside label = checkmark present
+                const hasSvgInLabel = label.querySelector('svg') !== null;
+                // Fallback C: check for bg-darkborderc anywhere in label (legacy theme)
+                const anyActiveClass = label.innerHTML.includes('bg-darkborderc');
+                isChecked = inputChecked || hasSvgInLabel || anyActiveClass;
+                if (debug) console.log(LOG_TAG, `[Parse] Label ${idx}: no indicator span, fallback → input.checked=${inputChecked} svg=${hasSvgInLabel} class=${anyActiveClass} → checked=${isChecked}`);
             }
 
             if (toggleName) {
@@ -491,7 +496,6 @@
                         </div>
                         <p class="text-xs text-gray-600 mt-1">🔬 토글 스캔 디버그: 사이드바의 토글을 읽고 콘솔에 상세 로그를 출력합니다. 문제 진단 시 사용하세요.</p>
                         <div id="${PREFIX}-debug-results" class="hidden mt-2 max-h-60 overflow-y-auto text-xs bg-gray-800 p-2 rounded border border-gray-600"></div>
-                    </details>
                     </details>
                 </div>
 
@@ -951,8 +955,10 @@
             // Show toggles that exist in current but not in preset
             currentToggles.forEach(current => {
                 if (!presetData.find(p => p.key === current.key)) {
+                    const typeIcon = current.type === 'checkbox' ? '☑️' : current.type === 'select' ? '📋' : '📝';
                     html += `<tr class="border-b border-gray-800 hover:bg-gray-800 opacity-50">`;
                     html += `<td class="py-2 px-2 text-gray-500">${escapeHtml(current.key)}</td>`;
+                    html += `<td class="py-2 px-2 text-gray-500 text-xs">${typeIcon}</td>`;
                     html += `<td class="py-2 px-2 text-gray-500">${current.type === 'checkbox' ? (current.value === '1' ? '✅' : '❌') : escapeHtml(current.value)}</td>`;
                     html += `<td class="py-2 px-2 text-center text-gray-600">—</td>`;
                     html += `<td class="py-2 px-2 text-gray-600">(프리셋에 없음)</td>`;

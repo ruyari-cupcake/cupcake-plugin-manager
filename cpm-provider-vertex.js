@@ -1,5 +1,5 @@
 //@name CPM Provider - Vertex AI
-//@version 1.6.1
+//@version 1.6.2
 //@description Google Vertex AI (Service Account) provider for Cupcake PM (Streaming, Key Rotation)
 //@icon 🔷
 //@update-url https://raw.githubusercontent.com/ruyari-cupcake/cupcake-plugin-manager/main/cpm-provider-vertex.js
@@ -57,14 +57,17 @@
         const binaryKey = atob(key.private_key.replace(/-----BEGIN .*?-----/g, '').replace(/-----END .*?-----/g, '').replace(/\s/g, ''));
         const bytes = new Uint8Array(binaryKey.length);
         for (let i = 0; i < binaryKey.length; i++) bytes[i] = binaryKey.charCodeAt(i);
-        const privateKey = await crypto.subtle.importKey('pkcs8', bytes.buffer, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['sign']);
+        // Use .slice(0) to create an owned ArrayBuffer copy.
+        // WebKit (iOS/Safari) can fail with shared ArrayBuffer references in importKey.
+        const keyBuffer = bytes.buffer.slice(0);
+        const privateKey = await crypto.subtle.importKey('pkcs8', keyBuffer, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['sign']);
         const signature = await crypto.subtle.sign('RSASSA-PKCS1-v1_5', privateKey, new TextEncoder().encode(unsignedToken));
         const sigB64 = btoa(String.fromCharCode(...new Uint8Array(signature))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
         const jwt = `${unsignedToken}.${sigB64}`;
 
         // Use smartNativeFetch (3-strategy fallback) to avoid V3 iframe bridge
         // structured clone errors with raw Risuai.nativeFetch
-        const _fetchFn = typeof CPM.smartNativeFetch === 'function' ? CPM.smartNativeFetch : Risuai.nativeFetch;
+        const _fetchFn = typeof CPM.smartNativeFetch === 'function' ? CPM.smartNativeFetch : (window.Risuai || window.risuai).nativeFetch;
         const res = await _fetchFn('https://oauth2.googleapis.com/token', {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -190,10 +193,10 @@
                 const loc = config.location || 'global';
                 const model = config.model || 'gemini-2.5-flash';
                 let accessToken;
-                try { accessToken = await getVertexAccessToken(keyJson); } catch (e) { return { success: false, content: `[Vertex] 토큰 발급 오류: ${e.message}` }; }
+                try { accessToken = await getVertexAccessToken(keyJson); } catch (e) { return { success: false, content: `[Vertex] 토큰 발급 오류: ${e.message}`, _status: 401 }; }
                 const baseUrl = loc === 'global' ? 'https://aiplatform.googleapis.com' : `https://${loc}-aiplatform.googleapis.com`;
                 const isClaude = model.startsWith('claude-');
-                const fetchFn = typeof CPM.smartNativeFetch === 'function' ? CPM.smartNativeFetch : Risuai.nativeFetch;
+                const fetchFn = typeof CPM.smartNativeFetch === 'function' ? CPM.smartNativeFetch : (window.Risuai || window.risuai).nativeFetch;
 
                 if (isClaude) {
                     // ── Claude on Vertex (Model Garden) ──

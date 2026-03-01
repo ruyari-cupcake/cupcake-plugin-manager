@@ -1,5 +1,5 @@
 //@name CPM Provider - OpenRouter
-//@version 1.3.2
+//@version 1.3.3
 //@description OpenRouter provider for Cupcake PM (Streaming, Key Rotation)
 //@icon 🌐
 //@update-url https://raw.githubusercontent.com/ruyari-cupcake/cupcake-plugin-manager/main/cpm-provider-openrouter.js
@@ -43,7 +43,7 @@
                     body.provider = { order: [config.providerString] };
                 }
 
-                const fetchFn = typeof CPM.smartNativeFetch === 'function' ? CPM.smartNativeFetch : Risuai.nativeFetch;
+                const fetchFn = typeof CPM.smartNativeFetch === 'function' ? CPM.smartNativeFetch : (window.Risuai || window.risuai).nativeFetch;
                 const res = await fetchFn(url, {
                     method: 'POST',
                     headers: {

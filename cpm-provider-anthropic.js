@@ -1,5 +1,5 @@
 //@name CPM Provider - Anthropic
-//@version 1.6.3
+//@version 1.6.4
 //@description Anthropic Claude provider for Cupcake PM (Streaming, Key Rotation)
 //@icon 🟠
 //@update-url https://raw.githubusercontent.com/ruyari-cupcake/cupcake-plugin-manager/main/cpm-provider-anthropic.js
@@ -124,7 +124,7 @@
                     delete body.temperature;
                 }
 
-                const fetchFn = typeof CPM.smartNativeFetch === 'function' ? CPM.smartNativeFetch : Risuai.nativeFetch;
+                const fetchFn = typeof CPM.smartNativeFetch === 'function' ? CPM.smartNativeFetch : (window.Risuai || window.risuai).nativeFetch;
                 const res = await fetchFn(url, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
