@@ -58,5 +58,10 @@
         "version": "2.1.1",
         "file": "cpm-chat-navigation.js",
         "changes": "cupcake_other 통합"
+    },
+    "Cupcake Provider Manager": {
+        "version": "1.19.1",
+        "file": "provider-manager.js",
+        "changes": "메인 플러그인 자동 업데이트 알림 추가"
     }
 }

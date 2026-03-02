@@ -1,10 +1,10 @@
 //@name Cupcake_Provider_Manager
 //@display-name Cupcake Provider Manager
 //@api 3.0
-//@version 1.19.0
+//@version 1.19.1
 //@update-url https://cupcake-plugin-manager.vercel.app/provider-manager.js
 
-const CPM_VERSION = '1.19.0';
+const CPM_VERSION = '1.19.1';
 
 // ==========================================
 // 0. GLOBAL API REFERENCE (Risuai/risuai 대소문자 통일)
@@ -231,14 +231,121 @@ async function isDynamicFetchEnabled(providerName) {
 
 /**
  * Strip RisuAI-internal tags from message content.
- * {{inlay::...}} and <qak> are RisuAI-internal markup that must not leak to API.
+ * Keep inlay tokens intact to avoid breaking translation/aux slot image flows.
  */
 function stripInternalTags(text) {
     if (typeof text !== 'string') return text;
     return text
-        .replace(/\{\{(?:inlayed|inlay)::[^}]*\}\}/g, '')
         .replace(/<qak>|<\/qak>/g, '')
         .trim();
+}
+
+function stripStaleAutoCaption(text, message) {
+    if (typeof text !== 'string') return text;
+    if (hasAttachedMultimodals(message)) return text;
+
+    const lower = text.toLowerCase();
+    const imageIntent = lower.includes('image') || lower.includes('photo') || lower.includes('picture') || lower.includes('첨부') || lower.includes('사진');
+    if (!imageIntent) return text;
+
+    return text.replace(/\s*\[[a-z0-9][a-z0-9 ,.'"-]{6,}\]\s*$/i, '').trim();
+}
+
+function hasAttachedMultimodals(message) {
+    return !!(message && Array.isArray(message.multimodals) && message.multimodals.length > 0);
+}
+
+function hasNonEmptyMessageContent(content) {
+    if (content === null || content === undefined) return false;
+    if (typeof content === 'string') return content.trim() !== '';
+    if (Array.isArray(content)) return content.length > 0;
+    if (typeof content === 'object') return true;
+    return String(content).trim() !== '';
+}
+
+function extractNormalizedMessagePayload(message) {
+    const normalizedMultimodals = [];
+    const textParts = [];
+
+    if (Array.isArray(message?.multimodals)) {
+        for (const modal of message.multimodals) {
+            if (modal && typeof modal === 'object') normalizedMultimodals.push(modal);
+        }
+    }
+
+    const content = message?.content;
+    if (typeof content === 'string') {
+        textParts.push(content);
+    } else if (Array.isArray(content)) {
+        for (const part of content) {
+            if (!part || typeof part !== 'object') continue;
+
+            if (typeof part.text === 'string' && part.text.trim() !== '') {
+                textParts.push(part.text);
+            }
+
+            if (part.inlineData && part.inlineData.data) {
+                const mimeType = part.inlineData.mimeType || 'application/octet-stream';
+                const dataUrl = `data:${mimeType};base64,${part.inlineData.data}`;
+                if (mimeType.startsWith('image/')) normalizedMultimodals.push({ type: 'image', base64: dataUrl, mimeType });
+                else if (mimeType.startsWith('audio/')) normalizedMultimodals.push({ type: 'audio', base64: dataUrl, mimeType });
+                else if (mimeType.startsWith('video/')) normalizedMultimodals.push({ type: 'video', base64: dataUrl, mimeType });
+            }
+
+            if (part.type === 'image_url') {
+                const imageUrl = part.image_url && typeof part.image_url.url === 'string' ? part.image_url.url : '';
+                if (imageUrl.startsWith('data:image/')) {
+                    const mimeType = imageUrl.split(';')[0]?.split(':')[1] || 'image/png';
+                    normalizedMultimodals.push({ type: 'image', base64: imageUrl, mimeType });
+                } else if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
+                    normalizedMultimodals.push({ type: 'image', url: imageUrl, mimeType: 'image/*' });
+                }
+            }
+
+            if (part.type === 'input_image') {
+                const imageUrl = typeof part.image_url === 'string'
+                    ? part.image_url
+                    : (part.image_url && typeof part.image_url.url === 'string' ? part.image_url.url : '');
+                if (imageUrl.startsWith('data:image/')) {
+                    const mimeType = imageUrl.split(';')[0]?.split(':')[1] || 'image/png';
+                    normalizedMultimodals.push({ type: 'image', base64: imageUrl, mimeType });
+                } else if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
+                    normalizedMultimodals.push({ type: 'image', url: imageUrl, mimeType: 'image/*' });
+                }
+            }
+
+            if (part.type === 'input_audio' && part.input_audio && part.input_audio.data) {
+                const format = part.input_audio.format || 'mp3';
+                const mimeType = `audio/${format}`;
+                normalizedMultimodals.push({ type: 'audio', base64: `data:${mimeType};base64,${part.input_audio.data}`, mimeType });
+            }
+
+            if (part.type === 'image' && part.source && part.source.type === 'base64' && part.source.data) {
+                const mimeType = part.source.media_type || 'image/png';
+                normalizedMultimodals.push({ type: 'image', base64: `data:${mimeType};base64,${part.source.data}`, mimeType });
+            }
+        }
+    } else if (content !== null && content !== undefined) {
+        if (typeof content === 'object' && typeof content.text === 'string') textParts.push(content.text);
+        else textParts.push(String(content));
+    }
+
+    return {
+        text: textParts.join('\n\n'),
+        multimodals: normalizedMultimodals,
+    };
+}
+
+function getSubPluginFileAccept() {
+    try {
+        const ua = (navigator.userAgent || '').toLowerCase();
+        const isIOS = /iphone|ipad|ipod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+        const isMobile = /android|iphone|ipad|ipod|mobile/.test(ua);
+        if (isIOS || isMobile) {
+            return '.js,.mjs,.txt,text/javascript,application/javascript,*/*';
+        }
+    } catch (_) {}
+    return '.js,.mjs,text/javascript,application/javascript';
 }
 
 /**
@@ -272,7 +379,9 @@ function sanitizeMessages(messages) {
         if (typeof cleaned.toJSON === 'function') delete cleaned.toJSON;
         if (typeof cleaned.content === 'string') {
             cleaned.content = stripInternalTags(cleaned.content);
+            cleaned.content = stripStaleAutoCaption(cleaned.content, cleaned);
         }
+        if (!hasNonEmptyMessageContent(cleaned.content) && !hasAttachedMultimodals(cleaned)) continue;
         result.push(cleaned);
     }
     return result;
@@ -289,7 +398,7 @@ function sanitizeBodyJSON(jsonStr) {
             const before = obj.messages.length;
             obj.messages = obj.messages.filter(m => {
                 if (m == null || typeof m !== 'object') return false;
-                if (m.content === null || m.content === undefined) return false;
+                if (!hasNonEmptyMessageContent(m.content) && !hasAttachedMultimodals(m)) return false;
                 if (typeof m.role !== 'string' || !m.role) return false;
                 if (typeof m.toJSON === 'function') delete m.toJSON;
                 return true;
@@ -347,6 +456,60 @@ async function smartNativeFetch(url, options = {}) {
         console.log(`[CupcakePM] Direct fetch failed for ${url.substring(0, 60)}...: ${e.message}`);
     }
 
+    // Copilot/web safety: force proxy route via risuFetch(plainFetchDeforce).
+    // Why: nativeFetch follows db.usePlainFetch in web mode; when enabled it can
+    // become direct browser fetch and hit CORS on githubcopilot.com / copilot_internal.
+    // plainFetchDeforce guarantees proxy2 path in globalFetch.
+    const _isCopilotUrl = url.includes('githubcopilot.com') || url.includes('copilot_internal');
+    if (_isCopilotUrl && typeof Risu.risuFetch === 'function') {
+        try {
+            let bodyObj = undefined;
+            if (options.body && typeof options.body === 'string') {
+                try { bodyObj = JSON.parse(options.body); } catch { bodyObj = options.body; }
+            } else if (options.body) {
+                bodyObj = options.body;
+            }
+
+            const result = await Risu.risuFetch(url, {
+                method: options.method || 'POST',
+                headers: options.headers || {},
+                body: bodyObj,
+                rawResponse: true,
+                plainFetchDeforce: true,
+            });
+
+            if (result && result.data != null) {
+                let responseBody = null;
+                if (result.data instanceof Uint8Array) {
+                    responseBody = result.data;
+                } else if (ArrayBuffer.isView(result.data) || result.data instanceof ArrayBuffer) {
+                    responseBody = new Uint8Array(result.data instanceof ArrayBuffer ? result.data : result.data.buffer);
+                } else if (Array.isArray(result.data)) {
+                    responseBody = new Uint8Array(result.data);
+                } else if (typeof result.data === 'object' && !(result.data instanceof Blob) && typeof result.data.length === 'number') {
+                    try { responseBody = new Uint8Array(Array.from(result.data)); } catch (_) { }
+                } else if (typeof result.data === 'string') {
+                    if (result.status && result.status !== 0) {
+                        responseBody = new TextEncoder().encode(result.data);
+                    }
+                }
+
+                if (responseBody) {
+                    console.log(`[CupcakePM] Copilot proxy-forced risuFetch succeeded: status=${result.status} for ${url.substring(0, 60)}`);
+                    return new Response(responseBody, {
+                        status: result.status || 200,
+                        headers: new Headers(result.headers || {})
+                    });
+                }
+            }
+
+            const errPreview = typeof result?.data === 'string' ? result.data.substring(0, 120) : 'unknown';
+            console.log(`[CupcakePM] Copilot proxy-forced risuFetch not a real response: ${errPreview}`);
+        } catch (e) {
+            console.log(`[CupcakePM] Copilot proxy-forced risuFetch error: ${e.message}`);
+        }
+    }
+
     // Strategy 2: risuFetch with plainFetchForce — direct fetch from HOST window.
     // Preferred over nativeFetch because risuFetch collects the full response on
     // the host side and returns complete data, avoiding the ReadableStream
@@ -358,7 +521,6 @@ async function smartNativeFetch(url, options = {}) {
     //    risuFetch → globalFetch → fetchWithPlainFetch always does JSON.stringify(body),
     //    which corrupts non-JSON bodies (wraps strings in quotes). For these requests
     //    nativeFetch (Strategy 3) passes the raw body bytes correctly.
-    const _isCopilotUrl = url.includes('githubcopilot.com') || url.includes('copilot_internal');
     const _contentType = (options.headers && (
         options.headers['Content-Type'] || options.headers['content-type'] ||
         (typeof options.headers.get === 'function' ? options.headers.get('content-type') : '')
@@ -695,8 +857,10 @@ const SubPluginManager = {
     // No code is downloaded — just version numbers compared. Runs once per session with cooldown.
 
     VERSIONS_URL: 'https://cupcake-plugin-manager.vercel.app/api/versions',
+    MAIN_UPDATE_URL: 'https://cupcake-plugin-manager.vercel.app/provider-manager.js',
     _VERSION_CHECK_COOLDOWN: 600000, // 10분 (ms)
     _VERSION_CHECK_STORAGE_KEY: 'cpm_last_version_check',
+    _MAIN_VERSION_CHECK_STORAGE_KEY: 'cpm_last_main_version_check',
     _pendingUpdateNames: [], // Store names for settings UI badge
 
     /**
@@ -757,6 +921,22 @@ const SubPluginManager = {
                 }
             }
 
+            // ── Main Plugin Check (from same manifest — no extra fetch) ──
+            let mainUpdateInfo = null;
+            const mainRemote = manifest['Cupcake Provider Manager'];
+            if (mainRemote && mainRemote.version) {
+                const mainCmp = this.compareVersions(CPM_VERSION, mainRemote.version);
+                if (mainCmp > 0) {
+                    mainUpdateInfo = {
+                        localVersion: CPM_VERSION,
+                        remoteVersion: mainRemote.version,
+                        changes: mainRemote.changes || '',
+                    };
+                    window._cpmMainVersionFromManifest = true; // prevent fallback JS fetch
+                    console.log(`[CPM AutoCheck] Main plugin update available: ${CPM_VERSION}→${mainRemote.version}`);
+                }
+            }
+
             // Save check timestamp
             try {
                 await Risu.pluginStorage.setItem(this._VERSION_CHECK_STORAGE_KEY, String(Date.now()));
@@ -768,6 +948,16 @@ const SubPluginManager = {
                 await this.showUpdateToast(updatesAvailable);
             } else {
                 console.log(`[CPM AutoCheck] All sub-plugins up to date.`);
+            }
+
+            // Show main plugin update toast (delayed if sub-plugin toast was also shown to avoid overlap)
+            if (mainUpdateInfo) {
+                const delay = updatesAvailable.length > 0 ? 1500 : 0;
+                setTimeout(async () => {
+                    try {
+                        await this.showMainUpdateToast(mainUpdateInfo.localVersion, mainUpdateInfo.remoteVersion, mainUpdateInfo.changes);
+                    } catch (_) { }
+                }, delay);
             }
         } catch (e) {
             // Silently fail — this is a background convenience feature
@@ -869,6 +1059,163 @@ const SubPluginManager = {
             }, 8000);
         } catch (e) {
             console.debug('[CPM Toast] Failed to show toast:', e.message);
+        }
+    },
+
+    /**
+     * Fallback main plugin version check — only runs if manifest didn't include main plugin.
+     * Fetches remote provider-manager.js and extracts @version + @changes.
+     */
+    async checkMainPluginVersionQuiet() {
+        try {
+            // Skip if already resolved via lightweight manifest in checkVersionsQuiet()
+            if (window._cpmMainVersionFromManifest) {
+                console.log('[CPM MainAutoCheck] Already checked via manifest, skipping JS fallback.');
+                return;
+            }
+
+            // Session guard: only once per page load
+            if (window._cpmMainVersionChecked) return;
+            window._cpmMainVersionChecked = true;
+
+            // Cooldown guard
+            try {
+                const lastCheck = await Risu.pluginStorage.getItem(this._MAIN_VERSION_CHECK_STORAGE_KEY);
+                if (lastCheck) {
+                    const elapsed = Date.now() - parseInt(lastCheck, 10);
+                    if (elapsed < this._VERSION_CHECK_COOLDOWN) {
+                        console.log(`[CPM MainAutoCheck] Skipped — last check ${Math.round(elapsed / 60000)}min ago (cooldown: ${this._VERSION_CHECK_COOLDOWN / 60000}min)`);
+                        return;
+                    }
+                }
+            } catch (_) { /* pluginStorage not available, proceed anyway */ }
+
+            const cacheBuster = this.MAIN_UPDATE_URL + '?_t=' + Date.now();
+            console.log('[CPM MainAutoCheck] Fallback: fetching remote provider-manager.js...');
+
+            const result = await Risu.risuFetch(cacheBuster, {
+                method: 'GET',
+                plainFetchForce: true,
+            });
+
+            if (!result.data || (result.status && result.status >= 400)) {
+                console.debug(`[CPM MainAutoCheck] Fetch failed (${result.status}), silently skipped.`);
+                return;
+            }
+
+            const code = typeof result.data === 'string' ? result.data : String(result.data || '');
+            // Extract version
+            const verMatch = code.match(/\/\/\s*@version\s+([^\r\n]+)/i);
+            if (!verMatch) {
+                console.debug('[CPM MainAutoCheck] Remote version tag not found, skipped.');
+                return;
+            }
+            // Extract changes (optional @changes tag in JS header)
+            const changesMatch = code.match(/\/\/\s*@changes\s+(.+)/i);
+            const changes = changesMatch ? changesMatch[1].trim() : '';
+
+            const remoteVersion = (verMatch[1] || '').trim();
+            const localVersion = CPM_VERSION;
+            const cmp = this.compareVersions(localVersion, remoteVersion);
+
+            try {
+                await Risu.pluginStorage.setItem(this._MAIN_VERSION_CHECK_STORAGE_KEY, String(Date.now()));
+            } catch (_) { /* ignore */ }
+
+            if (cmp > 0) {
+                console.log(`[CPM MainAutoCheck] Main update available: ${localVersion}→${remoteVersion}`);
+                await this.showMainUpdateToast(localVersion, remoteVersion, changes);
+            } else {
+                console.log('[CPM MainAutoCheck] Main plugin is up to date.');
+            }
+        } catch (e) {
+            console.debug('[CPM MainAutoCheck] Silent error:', e.message || e);
+        }
+    },
+
+    /**
+     * Show a lightweight toast notification for main plugin update availability.
+     * Matches sub-plugin toast style but with amber accent + clear "메인 플러그인" label.
+     * Dynamically offsets if sub-plugin toast is also visible.
+     */
+    async showMainUpdateToast(localVersion, remoteVersion, changes) {
+        try {
+            const doc = await Risu.getRootDocument();
+            if (!doc) {
+                console.debug('[CPM MainToast] getRootDocument returned null');
+                return;
+            }
+
+            const existing = await doc.querySelector('[x-cpm-main-toast]');
+            if (existing) {
+                try { await existing.remove(); } catch (_) { }
+            }
+
+            // Avoid overlapping with sub-plugin toast
+            const subToastEl = await doc.querySelector('[x-cpm-toast]');
+            const bottomPos = subToastEl ? '110px' : '20px';
+
+            const toast = await doc.createElement('div');
+            await toast.setAttribute('x-cpm-main-toast', '1');
+            await toast.setStyle('position', 'fixed');
+            await toast.setStyle('bottom', bottomPos);
+            await toast.setStyle('right', '20px');
+            await toast.setStyle('zIndex', '99999');
+            await toast.setStyle('background', '#1f2937');
+            await toast.setStyle('border', '1px solid #374151');
+            await toast.setStyle('borderLeft', '3px solid #f59e0b');
+            await toast.setStyle('borderRadius', '10px');
+            await toast.setStyle('padding', '12px 14px');
+            await toast.setStyle('maxWidth', '380px');
+            await toast.setStyle('minWidth', '280px');
+            await toast.setStyle('boxShadow', '0 8px 24px rgba(0,0,0,0.4)');
+            await toast.setStyle('fontFamily', "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif");
+            await toast.setStyle('pointerEvents', 'auto');
+            await toast.setStyle('opacity', '0');
+            await toast.setStyle('transform', 'translateY(12px)');
+            await toast.setStyle('transition', 'opacity 0.3s ease, transform 0.3s ease');
+
+            const changesHtml = changes ? ` — ${changes}` : '';
+
+            await toast.setInnerHTML(`
+                <div style="display:flex;align-items:flex-start;gap:10px">
+                    <div style="font-size:20px;line-height:1;flex-shrink:0">🧁</div>
+                    <div style="flex:1;min-width:0">
+                        <div style="font-size:13px;font-weight:600;color:#fef3c7">⭐ 메인 플러그인 업데이트 있음</div>
+                        <div style="font-size:11px;color:#9ca3af;margin-top:2px">🧁 Cupcake PM <span style="color:#fcd34d">${localVersion} → ${remoteVersion}</span>${changesHtml}</div>
+                        <div style="font-size:11px;color:#6b7280;margin-top:4px">리스 설정 → 플러그인 탭 → + 버튼으로 업데이트</div>
+                    </div>
+                </div>
+            `);
+
+            const body = await doc.querySelector('body');
+            if (!body) {
+                console.debug('[CPM MainToast] body not found');
+                return;
+            }
+
+            await body.appendChild(toast);
+            console.log('[CPM MainToast] Main update toast appended to root body');
+
+            setTimeout(async () => {
+                try {
+                    await toast.setStyle('opacity', '1');
+                    await toast.setStyle('transform', 'translateY(0)');
+                } catch (_) { }
+            }, 50);
+
+            // Auto-dismiss after 10 seconds (slightly longer than sub-plugin toast)
+            setTimeout(async () => {
+                try {
+                    await toast.setStyle('opacity', '0');
+                    await toast.setStyle('transform', 'translateY(12px)');
+                    setTimeout(async () => {
+                        try { await toast.remove(); } catch (_) { }
+                    }, 350);
+                } catch (_) { }
+            }, 10000);
+        } catch (e) {
+            console.debug('[CPM MainToast] Failed to show toast:', e.message || e);
         }
     },
 
@@ -1738,15 +2085,19 @@ function formatToOpenAI(messages, config = {}) {
         const msg = { role, content: '' };
         // altrole: convert assistant→model for Gemini-style APIs (only when explicitly requested)
         if (config.altrole && msg.role === 'assistant') msg.role = 'model';
+
+        const payload = extractNormalizedMessagePayload(m);
+
         // Handle multimodals (images/audio) → OpenAI vision format
-        if (m.multimodals && Array.isArray(m.multimodals) && m.multimodals.length > 0) {
+        if (payload.multimodals.length > 0) {
             const contentParts = [];
-            const textContent = typeof m.content === 'string' ? m.content.trim() : String(m.content ?? '').trim();
+            const textContent = payload.text.trim();
             if (textContent) contentParts.push({ type: 'text', text: textContent });
-            for (const modal of m.multimodals) {
+            for (const modal of payload.multimodals) {
                 if (!modal || typeof modal !== 'object') continue;
                 if (modal.type === 'image') {
-                    contentParts.push({ type: 'image_url', image_url: { url: modal.base64 } });
+                    if (modal.base64) contentParts.push({ type: 'image_url', image_url: { url: modal.base64 } });
+                    else if (modal.url) contentParts.push({ type: 'image_url', image_url: { url: modal.url } });
                 } else if (modal.type === 'audio') {
                     contentParts.push({ type: 'input_audio', input_audio: { data: (modal.base64 || '').split(',')[1] || modal.base64, format: (modal.base64 || '').includes('wav') ? 'wav' : 'mp3' } });
                 }
@@ -1755,14 +2106,36 @@ function formatToOpenAI(messages, config = {}) {
         } else if (typeof m.content === 'string') {
             msg.content = m.content;
         } else if (Array.isArray(m.content)) {
-            // Filter null entries from content array (vision/audio parts)
-            msg.content = m.content.filter(p => p != null && typeof p === 'object');
+            const mappedParts = [];
+            for (const part of m.content) {
+                if (!part || typeof part !== 'object') continue;
+                if (part.type === 'image' && part.source && part.source.type === 'base64' && part.source.data) {
+                    const mimeType = part.source.media_type || 'image/png';
+                    mappedParts.push({ type: 'image_url', image_url: { url: `data:${mimeType};base64,${part.source.data}` } });
+                    continue;
+                }
+                if (part.inlineData && part.inlineData.data) {
+                    const mimeType = part.inlineData.mimeType || 'application/octet-stream';
+                    if (mimeType.startsWith('image/')) {
+                        mappedParts.push({ type: 'image_url', image_url: { url: `data:${mimeType};base64,${part.inlineData.data}` } });
+                    } else if (mimeType.startsWith('audio/')) {
+                        mappedParts.push({ type: 'input_audio', input_audio: { data: part.inlineData.data, format: mimeType.split('/')[1] || 'mp3' } });
+                    }
+                    continue;
+                }
+                mappedParts.push(part);
+            }
+            msg.content = mappedParts;
         } else {
-            msg.content = String(m.content ?? '');
+            msg.content = payload.text || String(m.content ?? '');
         }
         // Final validation: ensure msg.content is valid (not null/undefined)
         if (msg.content === null || msg.content === undefined) {
             console.warn(`[Cupcake PM] formatToOpenAI: skipped message with null content after formatting (index=${i}, role=${role})`);
+            continue;
+        }
+        if (!hasNonEmptyMessageContent(msg.content)) {
+            console.warn(`[Cupcake PM] formatToOpenAI: skipped empty-content message (index=${i}, role=${role})`);
             continue;
         }
         if (m.name && typeof m.name === 'string') msg.name = m.name;
@@ -1789,14 +2162,15 @@ function formatToAnthropic(messages, config = {}) {
     const formattedMsgs = [];
     for (const m of chatMsgs) {
         const role = m.role === 'assistant' ? 'assistant' : 'user';
+        const payload = extractNormalizedMessagePayload(m);
 
         // Multimodal handling (images) → Anthropic vision format
         // Aligned with Anthropic Messages API: content becomes array of content blocks
-        if (m.multimodals && Array.isArray(m.multimodals) && m.multimodals.length > 0) {
+        if (payload.multimodals.length > 0) {
             const contentParts = [];
-            const textContent = typeof m.content === 'string' ? m.content.trim() : String(m.content ?? '').trim();
+            const textContent = payload.text.trim();
             if (textContent) contentParts.push({ type: 'text', text: textContent });
-            for (const modal of m.multimodals) {
+            for (const modal of payload.multimodals) {
                 if (!modal || typeof modal !== 'object') continue;
                 if (modal.type === 'image') {
                     const base64Str = modal.base64 || '';
@@ -1826,6 +2200,7 @@ function formatToAnthropic(messages, config = {}) {
             } else {
                 // No valid multimodal parts, fall through to text-only
                 const content = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
+                if (!hasNonEmptyMessageContent(content)) continue;
                 if (formattedMsgs.length > 0 && formattedMsgs[formattedMsgs.length - 1].role === role) {
                     const prev = formattedMsgs[formattedMsgs.length - 1];
                     if (typeof prev.content === 'string') prev.content += '\n\n' + content;
@@ -1837,7 +2212,85 @@ function formatToAnthropic(messages, config = {}) {
             continue;
         }
 
-        const content = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
+        if (Array.isArray(m.content)) {
+            const contentParts = [];
+            for (const part of m.content) {
+                if (!part || typeof part !== 'object') continue;
+                if (typeof part.text === 'string' && part.text.trim() !== '') {
+                    contentParts.push({ type: 'text', text: part.text });
+                    continue;
+                }
+                if (part.type === 'image' && part.source && part.source.type === 'base64' && part.source.data) {
+                    contentParts.push(part);
+                    continue;
+                }
+                if (part.inlineData && part.inlineData.data) {
+                    const mimeType = part.inlineData.mimeType || 'application/octet-stream';
+                    if (mimeType.startsWith('image/')) {
+                        contentParts.push({
+                            type: 'image',
+                            source: { type: 'base64', media_type: mimeType, data: part.inlineData.data }
+                        });
+                    }
+                    continue;
+                }
+                if (part.type === 'image_url') {
+                    const imageUrl = typeof part.image_url === 'string'
+                        ? part.image_url
+                        : (part.image_url && typeof part.image_url.url === 'string' ? part.image_url.url : '');
+                    if (imageUrl.startsWith('data:image/')) {
+                        const mediaType = imageUrl.split(';')[0]?.split(':')[1] || 'image/png';
+                        const data = imageUrl.split(',')[1] || '';
+                        if (data) {
+                            contentParts.push({
+                                type: 'image',
+                                source: { type: 'base64', media_type: mediaType, data }
+                            });
+                        }
+                    } else if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
+                        contentParts.push({
+                            type: 'image',
+                            source: { type: 'url', url: imageUrl }
+                        });
+                    }
+                }
+
+                if (part.type === 'input_image') {
+                    const imageUrl = typeof part.image_url === 'string'
+                        ? part.image_url
+                        : (part.image_url && typeof part.image_url.url === 'string' ? part.image_url.url : '');
+                    if (imageUrl.startsWith('data:image/')) {
+                        const mediaType = imageUrl.split(';')[0]?.split(':')[1] || 'image/png';
+                        const data = imageUrl.split(',')[1] || '';
+                        if (data) {
+                            contentParts.push({
+                                type: 'image',
+                                source: { type: 'base64', media_type: mediaType, data }
+                            });
+                        }
+                    } else if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
+                        contentParts.push({
+                            type: 'image',
+                            source: { type: 'url', url: imageUrl }
+                        });
+                    }
+                }
+            }
+
+            if (contentParts.length > 0) {
+                if (formattedMsgs.length > 0 && formattedMsgs[formattedMsgs.length - 1].role === role) {
+                    const prev = formattedMsgs[formattedMsgs.length - 1];
+                    if (typeof prev.content === 'string') prev.content = [{ type: 'text', text: prev.content }, ...contentParts];
+                    else if (Array.isArray(prev.content)) prev.content.push(...contentParts);
+                } else {
+                    formattedMsgs.push({ role, content: contentParts });
+                }
+                continue;
+            }
+        }
+
+        const content = payload.text || (typeof m.content === 'string' ? m.content : JSON.stringify(m.content));
+        if (!hasNonEmptyMessageContent(content)) continue;
         if (formattedMsgs.length > 0 && formattedMsgs[formattedMsgs.length - 1].role === role) {
             const prev = formattedMsgs[formattedMsgs.length - 1];
             if (typeof prev.content === 'string') {
@@ -1905,7 +2358,13 @@ function formatToGemini(messagesRaw, config = {}) {
         if (m.role !== 'system') systemPhase = false;
 
         const role = (m.role === 'assistant' || m.role === 'model') ? 'model' : 'user';
-        const text = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
+        const payload = extractNormalizedMessagePayload(m);
+        const normalizedMultimodals = payload.multimodals;
+        let text = payload.text;
+        if (!text && !Array.isArray(m.content) && typeof m.content !== 'string') {
+            text = JSON.stringify(m.content);
+        }
+
         let trimmed = text.trim();
 
         // Strip thought display content from historical model messages
@@ -1926,11 +2385,11 @@ function formatToGemini(messagesRaw, config = {}) {
         }
 
         // Skip empty messages (LBI pre36 skips trimedContent === '')
-        if (trimmed === '' && !(m.multimodals && m.multimodals.length > 0)) continue;
+        if (trimmed === '' && normalizedMultimodals.length === 0) continue;
 
         // Multimodal handling (images/audio/video → inlineData)
         // Aligned with LBI pre36 multimodal → inlineData conversion
-        if (m.multimodals && Array.isArray(m.multimodals) && m.multimodals.length > 0) {
+        if (normalizedMultimodals.length > 0) {
             const lastMessage = contents.length > 0 ? contents[contents.length - 1] : null;
 
             // If same role as last message (consecutive), append to it
@@ -1943,8 +2402,12 @@ function formatToGemini(messagesRaw, config = {}) {
                         lastMessage.parts[lastMessage.parts.length - 1].text += '\n\n' + trimmed;
                     }
                 }
-                for (const modal of m.multimodals) {
+                for (const modal of normalizedMultimodals) {
                     if (modal.type === 'image' || modal.type === 'audio' || modal.type === 'video') {
+                        if (modal.url && modal.type === 'image') {
+                            lastMessage.parts.push({ fileData: { mimeType: modal.mimeType || 'image/*', fileUri: modal.url } });
+                            continue;
+                        }
                         const base64 = modal.base64 || '';
                         const commaIdx = base64.indexOf(',');
                         const mimeType = (commaIdx > -1 ? base64.split(';')[0]?.split(':')[1] : null) || modal.mimeType || 'application/octet-stream';
@@ -1956,8 +2419,12 @@ function formatToGemini(messagesRaw, config = {}) {
                 // New message with multimodal content
                 const newParts = [];
                 if (trimmed) newParts.push({ text: trimmed });
-                for (const modal of m.multimodals) {
+                for (const modal of normalizedMultimodals) {
                     if (modal.type === 'image' || modal.type === 'audio' || modal.type === 'video') {
+                        if (modal.url && modal.type === 'image') {
+                            newParts.push({ fileData: { mimeType: modal.mimeType || 'image/*', fileUri: modal.url } });
+                            continue;
+                        }
                         const base64 = modal.base64 || '';
                         const commaIdx = base64.indexOf(',');
                         const mimeType = (commaIdx > -1 ? base64.split(';')[0]?.split(':')[1] : null) || modal.mimeType || 'application/octet-stream';
@@ -2674,12 +3141,19 @@ async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {}, abor
         const before = body.messages.length;
         body.messages = body.messages.filter(m => {
             if (m == null || typeof m !== 'object') return false;
-            if (m.content === null || m.content === undefined) return false;
+            if (!hasNonEmptyMessageContent(m.content) && !hasAttachedMultimodals(m)) return false;
             if (typeof m.role !== 'string' || !m.role) return false;
             return true;
         });
         if (body.messages.length < before) {
             console.warn(`[Cupcake PM] ⚠️ Removed ${before - body.messages.length} null/invalid entries from messages array (was ${before}, now ${body.messages.length})`);
+        }
+        if (body.messages.length === 0) {
+            console.warn('[Cupcake PM] Empty messages after sanitization. Blocking request to prevent provider 400 errors.');
+            return {
+                success: false,
+                content: '[Cupcake PM] messages must be non-empty (all messages became empty after sanitization)'
+            };
         }
     }
     if (body.contents) {
@@ -3330,11 +3804,27 @@ function _exposeScopeToWindow() {
         for (const modelDef of ALL_DEFINED_MODELS) {
             let pLabel = modelDef.provider;
             let mLabel = modelDef.name;
+
+            // ── Model capability flags ──
+            // LLMFlags enum values (from RisuAI types.ts):
+            //   0 = hasImageInput, 9 = hasFullSystemPrompt, 10 = hasStreaming
+            // hasImageInput is CRITICAL — without it RisuAI converts images to
+            // text captions via runImageEmbedding() and never sends image data.
+            const modelFlags = [
+                0,   // hasImageInput
+                9,   // hasFullSystemPrompt
+                10,  // hasStreaming
+            ];
+
             await Risu.addProvider(`🧁 [${pLabel}] ${mLabel}`, async (args, abortSignal) => {
                 try {
                     return await handleRequest(args, modelDef, abortSignal);
                 } catch (err) {
                     return { success: false, content: `[Cupcake SDK Fallback Crash] ${err.message}` };
+                }
+            }, {
+                model: {
+                    flags: modelFlags,
                 }
             });
         }
@@ -3343,6 +3833,7 @@ function _exposeScopeToWindow() {
         // Fire-and-forget: 5초 후 경량 버전 체크, 실패해도 무시
         setTimeout(() => {
             SubPluginManager.checkVersionsQuiet().catch(() => { });
+            SubPluginManager.checkMainPluginVersionQuiet().catch(() => { });
         }, 5000);
 
         // Setup the Native Sidebar UI settings
@@ -3735,9 +4226,9 @@ function _exposeScopeToWindow() {
                 let html = `
                     <div class="bg-gray-800 border-2 border-dashed border-gray-600 rounded-lg p-6 text-center hover:bg-gray-700 transition-colors cursor-pointer mb-6" id="cpm-btn-upload-plugin">
                         <div class="text-4xl mb-2">📥</div>
-                        <h4 class="text-lg font-bold text-gray-200">설치할 서브 플러그인 선택 (.js)</h4>
+                        <h4 class="text-lg font-bold text-gray-200">설치할 서브 플러그인 선택 (.js/.mjs)</h4>
                         <p class="text-sm text-gray-400 mt-1">파일을 클릭하여 업로드하세요</p>
-                        <input type="file" id="cpm-file-plugin" accept=".js" class="hidden">
+                        <input type="file" id="cpm-file-plugin" accept="${getSubPluginFileAccept()}" class="hidden">
                     </div>
                 `;
 
