@@ -1,10 +1,10 @@
 //@name Cupcake_Provider_Manager
 //@display-name Cupcake Provider Manager
 //@api 3.0
-//@version 1.19.1
+//@version 1.19.2
 //@update-url https://cupcake-plugin-manager.vercel.app/provider-manager.js
 
-const CPM_VERSION = '1.19.1';
+const CPM_VERSION = '1.19.2';
 
 // ==========================================
 // 0. GLOBAL API REFERENCE (Risuai/risuai 대소문자 통일)
