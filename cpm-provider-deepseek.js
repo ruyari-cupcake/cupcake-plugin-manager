@@ -1,5 +1,5 @@
 //@name CPM Provider - DeepSeek
-//@version 1.4.4
+//@version 1.4.5
 //@description DeepSeek provider for Cupcake PM (Streaming, Key Rotation)
 //@icon 🟣
 //@update-url https://raw.githubusercontent.com/ruyari-cupcake/cupcake-plugin-manager/main/cpm-provider-deepseek.js

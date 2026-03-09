@@ -1,7 +1,7 @@
 # Cupcake Provider Manager — Sub-Plugin Development Guide
 
-> **Last Updated:** 2026-02-26  
-> **CPM Version:** 1.11.2  
+> **Last Updated:** 2026-03-09  
+> **CPM Version:** 1.19.6  
 > **RisuAI Compatibility:** V3 (iframe-sandboxed plugins)
 
 ---
@@ -61,7 +61,7 @@ Sub-plugins are standalone `.js` files that run inside CPM's execution context (
 ```
 RisuAI V3 App
   └─ iframe (about:srcdoc, sandboxed)
-       └─ provider-manager.js (CPM v1.11.2 engine)
+       └─ provider-manager.js (CPM v1.19.6 engine)
             ├─ window.CupcakePM API exposed
             ├─ KeyPool (key rotation engine)
             ├─ SettingsBackup (pluginStorage persistence)
@@ -268,18 +268,35 @@ const CPM = window.CupcakePM;
 | `CPM.formatToAnthropic(messages, config?)` | Function | Format messages for Anthropic API (see §7) |
 | `CPM.formatToGemini(messages, config?)` | Function | Format messages for Gemini API (see §7) |
 | `CPM.buildGeminiThinkingConfig(model, level, budget?)` | Function | Build Gemini thinkingConfig (3+ vs 2.5) |
+| `CPM.getGeminiSafetySettings()` | Function | Get Gemini safety settings from user config |
+| `CPM.validateGeminiParams()` | Function | Validate Gemini API parameters before request |
+| `CPM.isExperimentalGeminiModel(modelId)` | Function | Check if a Gemini model is experimental (Gemma, LearnLM, etc.) |
+| `CPM.cleanExperimentalModelParams(body)` | Function | Remove unsupported params for experimental Gemini models |
 
 ### SSE Streaming
 
 | API | Type | Description |
 |-----|------|-------------|
 | `CPM.createSSEStream(response, lineParser, abortSignal?)` | Function | Create SSE ReadableStream (see §8) |
+| `CPM.createOpenAISSEStream(response, abortSignal?)` | Function | Pre-built OpenAI SSE stream with reasoning support |
+| `CPM.createResponsesAPISSEStream(response, abortSignal?)` | Function | OpenAI Responses API SSE stream (NEW in v1.15+) |
 | `CPM.parseOpenAISSELine(line)` | Function | Parse OpenAI SSE `data:` line → delta text |
 | `CPM.createAnthropicSSEStream(response, abortSignal?)` | Function | Create Anthropic SSE stream (handles event types) |
 | `CPM.parseGeminiSSELine(line, config?)` | Function | Parse Gemini SSE line → delta text |
 | `CPM.collectStream(stream)` | Function | Collect a ReadableStream\<string\> into a single string |
+| `CPM.saveThoughtSignatureFromStream(stream)` | Function | Save thought signature from streaming response for Gemini |
+| `CPM.ThoughtSignatureCache` | Object | Read-only accessor for cached thought signatures |
 
-### Key Rotation (NEW)
+### Non-Streaming Response Parsers
+
+| API | Type | Description |
+|-----|------|-------------|
+| `CPM.parseOpenAINonStreamingResponse(json)` | Function | Extract text from OpenAI non-streaming response |
+| `CPM.parseResponsesAPINonStreamingResponse(json)` | Function | Extract text from Responses API non-streaming response |
+| `CPM.parseClaudeNonStreamingResponse(json)` | Function | Extract text from Anthropic non-streaming response |
+| `CPM.parseGeminiNonStreamingResponse(json)` | Function | Extract text from Gemini non-streaming response |
+
+### Key Rotation
 
 | API | Type | Description |
 |-----|------|-------------|
@@ -321,12 +338,22 @@ const CPM = window.CupcakePM;
 | `CPM.AwsV4Signer` | Class | AWS Signature V4 signer (for Bedrock) |
 | `CPM.vertexTokenCache` | Object | Shared Vertex AI OAuth token cache `{ token, expiry }` |
 
-### Hot-Reload
+### Hot-Reload & Lifecycle
 
 | API | Type | Description |
 |-----|------|-------------|
 | `CPM.hotReload(pluginId)` | Function | Hot-reload a specific sub-plugin |
 | `CPM.hotReloadAll()` | Function | Hot-reload all sub-plugins |
+| `CPM.registerCleanup(cleanupFn)` | Function | Register a cleanup hook for unload/hot-reload (called automatically) |
+| `CPM.isStreamingAvailable()` | Async Function | Returns `{ enabled, bridgeCapable, active }` streaming status |
+
+### Utility
+
+| API | Type | Description |
+|-----|------|-------------|
+| `CPM.safeUUID()` | Function | Generate a cryptographically random UUID (fallback to Math.random) |
+| `CPM._needsCopilotResponsesAPI(model)` | Function | Check if model requires OpenAI Responses API (gpt-4.1+, o-series) |
+| `CPM._normalizeTokenUsage(raw)` | Function | Normalize token usage from various provider formats |
 
 ### RisuAI APIs Available in Context
 
@@ -457,6 +484,17 @@ CPM automatically tracks which sub-plugin registered each provider. When a sub-p
 
 This means sub-plugins **do not** need to manually handle cleanup — CPM tracks registrations via `_currentExecutingPluginId`.
 
+However, for **custom cleanup** (e.g., removing global event listeners, clearing intervals), use `registerCleanup`:
+
+```javascript
+CPM.registerCleanup(() => {
+    clearInterval(myPollingInterval);
+    window.removeEventListener('message', myHandler);
+});
+```
+
+This hook is called automatically during unload or hot-reload.
+
 ---
 
 ## 7. Message Formatting Helpers
@@ -585,7 +623,27 @@ const stream = CPM.createSSEStream(res, CPM.parseOpenAISSELine, abortSignal);
 
 Handles `data: [DONE]` termination. Works with: OpenAI, DeepSeek, OpenRouter, and any OpenAI-compatible endpoint.
 
-### 8.3 `createAnthropicSSEStream(response, abortSignal?)`
+### 8.3 `createOpenAISSEStream(response, abortSignal?)` *(NEW in v1.15+)*
+
+Pre-built OpenAI SSE stream with reasoning/thinking block support:
+
+```javascript
+const stream = CPM.createOpenAISSEStream(res, abortSignal);
+```
+
+Automatically wraps `reasoning_content` deltas in `<Thoughts>` tags.
+
+### 8.4 `createResponsesAPISSEStream(response, abortSignal?)` *(NEW in v1.15+)*
+
+Pre-built SSE stream for OpenAI Responses API (used by gpt-4.1+, o-series models):
+
+```javascript
+const stream = CPM.createResponsesAPISSEStream(res, abortSignal);
+```
+
+Handles Responses API event types (`response.output_text.delta`, `response.reasoning_summary_text.delta`, etc.).
+
+### 8.5 `createAnthropicSSEStream(response, abortSignal?)`
 
 Pre-built Anthropic SSE stream (handles `event: content_block_delta` + `data: {...}` pairs):
 
@@ -595,7 +653,7 @@ const stream = CPM.createAnthropicSSEStream(res, abortSignal);
 
 Extracts `delta.text` from `content_block_delta` events only.
 
-### 8.4 `parseGeminiSSELine(line, config?)`
+### 8.6 `parseGeminiSSELine(line, config?)`
 
 Pre-built Gemini SSE parser:
 
@@ -610,7 +668,7 @@ Config options:
 - `showThoughtsToken` — Include thought process text in output
 - `useThoughtSignature` — Include thought signature in output
 
-### 8.5 `collectStream(stream)`
+### 8.7 `collectStream(stream)`
 
 Utility to collect a ReadableStream into a single string:
 
@@ -778,7 +836,7 @@ When dynamic models are fetched successfully:
 
 ## 11. Key Rotation (키 회전)
 
-CPM v1.11.2 includes a built-in **KeyPool** system for automatic multi-key rotation. Users can enter multiple API keys separated by whitespace/newlines in a single settings field.
+CPM v1.19.6 includes a built-in **KeyPool** system for automatic multi-key rotation. Users can enter multiple API keys separated by whitespace/newlines in a single settings field.
 
 ### 11.1 Basic Key Rotation
 
@@ -1116,23 +1174,34 @@ await risuai.pluginStorage.setItem('my_custom_data', JSON.stringify(myData));
 
 ```
 your-repo/
-├── provider-manager.js          # Main CPM engine (v1.11.2)
-├── cpm-provider-openai.js       # OpenAI sub-plugin
-├── cpm-provider-anthropic.js    # Anthropic sub-plugin
-├── cpm-provider-gemini.js       # Gemini Studio sub-plugin
-├── cpm-provider-vertex.js       # Vertex AI sub-plugin
-├── cpm-provider-aws.js          # AWS Bedrock sub-plugin
-├── cpm-provider-deepseek.js     # DeepSeek sub-plugin
-├── cpm-provider-openrouter.js   # OpenRouter sub-plugin
-├── cpm-copilot-manager.js       # GitHub Copilot Token Manager
-├── cpm-chat-resizer.js          # Chat Input Resizer UI component
-├── cpm-translation-cache.js     # Translation Cache Manager
-├── versions.json                # Version manifest
-├── update-bundle.json           # ⚠️ BUNDLED versions + code (auto-generated)
+├── src/                           # ESM source modules (v1.19.6)
+│   ├── index.js                   # Rollup entry point
+│   ├── plugin-header.js           # RisuAI @arg declarations
+│   └── lib/                       # All core modules (27+)
+├── dist/
+│   └── provider-manager.js        # Built IIFE bundle
+├── tests/                         # Vitest test files (30+)
+├── cpm-provider-openai.js         # OpenAI sub-plugin
+├── cpm-provider-anthropic.js      # Anthropic sub-plugin
+├── cpm-provider-gemini.js         # Gemini Studio sub-plugin
+├── cpm-provider-vertex.js         # Vertex AI sub-plugin
+├── cpm-provider-aws.js            # AWS Bedrock sub-plugin
+├── cpm-provider-deepseek.js       # DeepSeek sub-plugin
+├── cpm-provider-openrouter.js     # OpenRouter sub-plugin
+├── cpm-copilot-manager.js         # GitHub Copilot Token Manager
+├── cpm-chat-resizer.js            # Chat Input Resizer UI component
+├── cpm-translation-cache.js       # Translation Cache Manager
+├── versions.json                  # Version manifest
+├── update-bundle.json             # ⚠️ BUNDLED versions + code (auto-generated)
 ├── api/
-│   └── update-bundle.js         # Vercel serverless function
-├── vercel.json                  # Vercel routing config
-└── PLUGIN_GUIDE.md              # This guide
+│   ├── versions.js                # Vercel serverless — version manifest
+│   └── update-bundle.js           # Vercel serverless — update bundle
+├── vercel.json                    # Vercel routing config
+├── rollup.config.mjs             # Rollup build config
+├── vitest.config.js              # Vitest + coverage config
+├── eslint.config.js              # ESLint 9 flat config
+├── tsconfig.typecheck.json       # TypeScript checkJs config
+└── PLUGIN_GUIDE.md               # This guide
 ```
 
 ### 16.2 versions.json

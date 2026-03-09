@@ -1,6 +1,6 @@
 //@name CPM Component - Copilot Token Manager
 //@display-name Cupcake Copilot Manager
-//@version 1.7.1
+//@version 1.7.2
 //@author Cupcake
 //@update-url https://raw.githubusercontent.com/ruyari-cupcake/cupcake-plugin-manager/main/cpm-copilot-manager.js
 

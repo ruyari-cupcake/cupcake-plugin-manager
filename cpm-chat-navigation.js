@@ -1,6 +1,6 @@
 //@name CPM Component - Chat Navigation
 //@display-name 🧁 Cupcake Navigation
-//@version 2.1.2
+//@version 2.1.3
 //@description 채팅 메시지 네비게이션 (4버튼 → 2버튼 → 키보드 → OFF 순환)
 //@icon 🧭
 //@author Cupcake

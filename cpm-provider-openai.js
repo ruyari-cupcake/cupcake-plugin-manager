@@ -1,5 +1,5 @@
 //@name CPM Provider - OpenAI
-//@version 1.5.5
+//@version 1.5.7
 //@description OpenAI provider for Cupcake PM (Streaming, Key Rotation)
 //@icon 🟢
 //@update-url https://raw.githubusercontent.com/ruyari-cupcake/cupcake-plugin-manager/main/cpm-provider-openai.js
@@ -111,6 +111,14 @@
                 return /(?:^|\/)o(?:3(?:-mini|-pro|-deep-research)?|4-mini(?:-deep-research)?)$/i.test(m);
             };
 
+            const stripSamplingForGPT54Reasoning = (model, reasoning) => {
+                if (!model) return false;
+                const m = String(model).toLowerCase();
+                const effort = String(reasoning || '').trim().toLowerCase();
+                if (!effort || effort === 'none' || effort === 'off') return false;
+                return /(?:^|\/)gpt-5\.4(?:-(?:mini|nano|pro))?(?:-\d{4}-\d{2}-\d{2})?$/i.test(m);
+            };
+
             const url = config.url || 'https://api.openai.com/v1/chat/completions';
             const modelName = config.model || 'gpt-4o';
             // BUG-A3 FIX: o-series models (o1, o3, o4) also require system → developer role conversion
@@ -150,7 +158,11 @@
 
                 // Responses API uses 'input' array; Chat Completions uses 'messages'
                 if (_needsResponsesAPI) {
-                    body.input = Array.isArray(formattedMessages) ? formattedMessages.filter(m => m != null && typeof m === 'object') : [];
+                    // Response API does not accept 'name' field on input items (e.g. example_assistant, example_user).
+                    // Sending it causes 400: "Unknown parameter: 'input[N].name'"
+                    body.input = Array.isArray(formattedMessages)
+                        ? formattedMessages.filter(m => m != null && typeof m === 'object').map(({ name, ...rest }) => rest)
+                        : [];
                 } else {
                     body.messages = Array.isArray(formattedMessages) ? formattedMessages.filter(m => m != null && typeof m === 'object') : [];
                 }
@@ -197,6 +209,10 @@
                     delete body.top_p;
                     delete body.frequency_penalty;
                     delete body.presence_penalty;
+                }
+                if (stripSamplingForGPT54Reasoning(modelName, config.reasoning)) {
+                    delete body.temperature;
+                    delete body.top_p;
                 }
 
                 if (config.reasoning && config.reasoning !== 'none' && supportsReasoningEffort(modelName)) {
