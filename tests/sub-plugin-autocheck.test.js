@@ -165,7 +165,7 @@ const VALID_PLUGIN_CODE = [
     '//@display-name Cupcake Provider Manager',
     '//@api 3.0',
     '//@version 1.20.0',
-    '//@update-url https://cupcake-plugin-manager.vercel.app/provider-manager.js',
+    '//@update-url https://cupcake-plugin-manager-test.vercel.app/api/main-plugin',
     '//@arg cpm_openai_key string OpenAI API Key',
     '//@arg cpm_openai_model string OpenAI Model',
     '//@arg debug int {{name:디버그 모드}} {{checkbox:활성화}}',
@@ -186,7 +186,7 @@ function makeExistingPlugin() {
         version: '3.0',
         customLink: [],
         versionOfPlugin: '1.19.6',
-        updateURL: 'https://cupcake-plugin-manager.vercel.app/provider-manager.js',
+        updateURL: 'https://cupcake-plugin-manager-test.vercel.app/api/main-plugin',
         enabled: true,
     };
 }
@@ -205,6 +205,7 @@ describe('safeMainPluginUpdate', () => {
 
     it('downloads, validates, and installs plugin preserving existing settings', async () => {
         const existingPlugin = makeExistingPlugin();
+        mockRisuFetch.mockResolvedValueOnce({ status: 500, data: '' });
         mockNativeFetch.mockResolvedValue({
             ok: true, status: 200,
             text: async () => VALID_PLUGIN_CODE,
@@ -241,6 +242,7 @@ describe('safeMainPluginUpdate', () => {
 
     it('rejects code with wrong plugin name', async () => {
         const wrongNameCode = VALID_PLUGIN_CODE.replace('Cupcake_Provider_Manager', 'Some_Other_Plugin');
+        mockRisuFetch.mockResolvedValueOnce({ status: 500, data: '' });
         mockNativeFetch.mockResolvedValue({
             ok: true, status: 200,
             text: async () => wrongNameCode,
@@ -256,6 +258,7 @@ describe('safeMainPluginUpdate', () => {
 
     it('rejects code with missing version tag', async () => {
         const noVersionCode = VALID_PLUGIN_CODE.replace('//@version 1.20.0', '// no version');
+        mockRisuFetch.mockResolvedValueOnce({ status: 500, data: '' });
         mockNativeFetch.mockResolvedValue({
             ok: true, status: 200,
             text: async () => noVersionCode,
@@ -271,6 +274,7 @@ describe('safeMainPluginUpdate', () => {
     it('retries on incomplete download and fails after MAX_RETRIES', async () => {
         const fullLength = new TextEncoder().encode(VALID_PLUGIN_CODE).byteLength;
         // Return truncated text but correct Content-Length header
+        mockRisuFetch.mockResolvedValueOnce({ status: 500, data: '' });
         mockNativeFetch.mockResolvedValue({
             ok: true, status: 200,
             text: async () => VALID_PLUGIN_CODE.slice(0, 10),
@@ -285,20 +289,35 @@ describe('safeMainPluginUpdate', () => {
         expect(mockNativeFetch).toHaveBeenCalledTimes(3);
     });
 
-    it('falls back to risuFetch if nativeFetch throws', async () => {
-        mockNativeFetch.mockRejectedValue(new Error('nativeFetch not available'));
-        mockRisuFetch.mockResolvedValue({ status: 200, data: VALID_PLUGIN_CODE });
+    it('prefers update bundle via risuFetch and skips static JS fallback when bundle is valid', async () => {
+        const hash = await SubPluginManager._computeSHA256?.(VALID_PLUGIN_CODE);
+        mockRisuFetch.mockResolvedValueOnce({
+            status: 200,
+            data: JSON.stringify({
+                versions: {
+                    'Cupcake Provider Manager': {
+                        version: '1.20.0',
+                        file: 'provider-manager.js',
+                        sha256: hash,
+                    },
+                },
+                code: {
+                    'provider-manager.js': VALID_PLUGIN_CODE,
+                },
+            }),
+        });
         mockGetDatabase.mockResolvedValue({ plugins: [makeExistingPlugin()] });
         mockSetDatabaseLite.mockResolvedValue(undefined);
 
         const result = await SubPluginManager.safeMainPluginUpdate('1.20.0');
 
         expect(result.ok).toBe(true);
-        expect(mockNativeFetch).toHaveBeenCalledTimes(1);
         expect(mockRisuFetch).toHaveBeenCalledTimes(1);
+        expect(mockNativeFetch).not.toHaveBeenCalled();
     });
 
     it('fails if getDatabase returns null (permission denied)', async () => {
+        mockRisuFetch.mockResolvedValueOnce({ status: 500, data: '' });
         mockNativeFetch.mockResolvedValue({
             ok: true, status: 200,
             text: async () => VALID_PLUGIN_CODE,
@@ -313,6 +332,7 @@ describe('safeMainPluginUpdate', () => {
     });
 
     it('fails if plugin not found in DB', async () => {
+        mockRisuFetch.mockResolvedValueOnce({ status: 500, data: '' });
         mockNativeFetch.mockResolvedValue({
             ok: true, status: 200,
             text: async () => VALID_PLUGIN_CODE,
@@ -324,5 +344,37 @@ describe('safeMainPluginUpdate', () => {
 
         expect(result.ok).toBe(false);
         expect(result.error).toContain('찾을 수 없습니다');
+    });
+
+    it('rejects expected-version mismatch before DB write', async () => {
+        mockRisuFetch.mockResolvedValueOnce({ status: 500, data: '' });
+        mockNativeFetch.mockResolvedValue({
+            ok: true, status: 200,
+            text: async () => VALID_PLUGIN_CODE,
+            headers: { get: () => null },
+        });
+
+        const result = await SubPluginManager.safeMainPluginUpdate('1.20.1');
+
+        expect(result.ok).toBe(false);
+        expect(result.error).toContain('버전 불일치');
+        expect(mockGetDatabase).not.toHaveBeenCalled();
+    });
+
+    it('rejects downgrade downloads before DB write', async () => {
+        const downgradeCode = VALID_PLUGIN_CODE.replace('//@version 1.20.0', '//@version 1.19.5');
+        mockRisuFetch.mockResolvedValueOnce({ status: 500, data: '' });
+        mockNativeFetch.mockResolvedValue({
+            ok: true, status: 200,
+            text: async () => downgradeCode,
+            headers: { get: () => null },
+        });
+        mockGetDatabase.mockResolvedValue({ plugins: [makeExistingPlugin()] });
+
+        const result = await SubPluginManager.safeMainPluginUpdate('1.19.5');
+
+        expect(result.ok).toBe(false);
+        expect(result.error).toContain('다운그레이드 차단');
+        expect(mockSetDatabaseLite).not.toHaveBeenCalled();
     });
 });

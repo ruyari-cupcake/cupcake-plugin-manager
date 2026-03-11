@@ -37,7 +37,7 @@ describe('main plugin update regression guard', () => {
         expect(headerDisplayName).toBe('Cupcake Provider Manager');
         expect(distName).toBe(headerName);
         expect(distDisplayName).toBe(headerDisplayName);
-        expect(updateUrl).toBe('https://cupcake-plugin-manager-test.vercel.app/provider-manager.js');
+        expect(updateUrl).toBe('https://cupcake-plugin-manager-test.vercel.app/api/main-plugin');
         expect(versionOffset).toBeGreaterThanOrEqual(0);
         expect(new TextEncoder().encode(pluginHeader.slice(0, versionOffset) + '//@version').length).toBeLessThanOrEqual(512);
     });

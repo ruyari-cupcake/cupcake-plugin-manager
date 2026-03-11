@@ -1,8 +1,8 @@
 //@name Cupcake_Provider_Manager
 //@display-name Cupcake Provider Manager
 //@api 3.0
-//@version 1.19.11
-//@update-url https://cupcake-plugin-manager-test.vercel.app/provider-manager.js
+//@version 1.19.12
+//@update-url https://cupcake-plugin-manager-test.vercel.app/api/main-plugin
 
 // ==========================================
 // ARGUMENT SCHEMAS (Saved Natively by RisuAI)

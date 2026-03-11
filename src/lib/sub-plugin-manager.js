@@ -142,7 +142,7 @@ export const SubPluginManager = {
 
     // ── Lightweight Silent Version Check ──
     VERSIONS_URL: 'https://cupcake-plugin-manager-test.vercel.app/api/versions',
-    MAIN_UPDATE_URL: 'https://cupcake-plugin-manager-test.vercel.app/provider-manager.js',
+    MAIN_UPDATE_URL: 'https://cupcake-plugin-manager-test.vercel.app/api/main-plugin',
     _VERSION_CHECK_COOLDOWN: 600000,
     _VERSION_CHECK_STORAGE_KEY: 'cpm_last_version_check',
     _MAIN_VERSION_CHECK_STORAGE_KEY: 'cpm_last_main_version_check',
@@ -317,7 +317,7 @@ export const SubPluginManager = {
             } catch (_) { /* ignore */ }
 
             const cacheBuster = this.MAIN_UPDATE_URL + '?_t=' + Date.now();
-            console.log('[CPM MainAutoCheck] Fallback: fetching remote provider-manager.js...');
+            console.log('[CPM MainAutoCheck] Fallback: fetching remote main plugin script...');
 
             let code;
             try {
@@ -379,12 +379,65 @@ export const SubPluginManager = {
      * Download main plugin code with verification (retry + Content-Length check).
      * Used when we don't already have the code (e.g., manifest-only path).
      *
+     * @param {string} [expectedVersion] - Version announced by manifest/API.
      * @returns {Promise<{ok: boolean, code?: string, error?: string}>}
      */
-    async _downloadMainPluginCode() {
+    async _downloadMainPluginCode(expectedVersion) {
         const LOG = '[CPM Download]';
         const MAX_RETRIES = 3;
         const url = this.MAIN_UPDATE_URL;
+
+        // Prefer the update bundle because api/versions and api/update-bundle
+        // are generated from the same source of truth on the server.
+        // This avoids static-file drift where provider-manager.js can be stale
+        // while api/versions already advertises a newer main plugin version.
+        try {
+            const bundleUrl = this.UPDATE_BUNDLE_URL + '?_t=' + Date.now() + '_r=' + Math.random().toString(36).substr(2, 6);
+            console.log(`${LOG} Trying update bundle first: ${bundleUrl}`);
+            const bundleResult = await Promise.race([
+                Risu.risuFetch(bundleUrl, { method: 'GET', plainFetchForce: true }),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('update bundle fetch timed out (20s)')), 20000)),
+            ]);
+
+            if (bundleResult?.data && (!bundleResult.status || bundleResult.status < 400)) {
+                const rawBundle = typeof bundleResult.data === 'string' ? JSON.parse(bundleResult.data) : bundleResult.data;
+                const parsedBundle = validateSchema(rawBundle, schemas.updateBundle);
+                if (!parsedBundle.ok) {
+                    throw new Error(`update bundle schema invalid: ${parsedBundle.error}`);
+                }
+
+                const bundle = parsedBundle.data;
+                const mainEntry = bundle.versions?.['Cupcake Provider Manager'];
+                const fileName = mainEntry?.file || 'provider-manager.js';
+                const bundledCode = bundle.code?.[fileName];
+
+                if (!mainEntry?.version) {
+                    throw new Error('main plugin version missing in update bundle');
+                }
+                if (expectedVersion && mainEntry.version !== expectedVersion) {
+                    throw new Error(`bundle version mismatch: expected ${expectedVersion}, got ${mainEntry.version}`);
+                }
+                if (!bundledCode || typeof bundledCode !== 'string') {
+                    throw new Error(`main plugin code missing in update bundle (${fileName})`);
+                }
+                if (mainEntry.sha256) {
+                    const actualHash = await _computeSHA256(bundledCode);
+                    if (!actualHash) {
+                        throw new Error('SHA-256 computation failed for bundled main plugin code');
+                    }
+                    if (actualHash !== mainEntry.sha256) {
+                        throw new Error(`bundle sha256 mismatch: expected ${mainEntry.sha256.substring(0, 12)}…, got ${actualHash.substring(0, 12)}…`);
+                    }
+                    console.log(`${LOG} Bundle integrity OK [sha256:${mainEntry.sha256.substring(0, 12)}…]`);
+                }
+
+                console.log(`${LOG} Bundle download OK: ${fileName} v${mainEntry.version} (${(bundledCode.length / 1024).toFixed(1)}KB)`);
+                return { ok: true, code: bundledCode };
+            }
+            throw new Error(`update bundle fetch failed with status ${bundleResult?.status}`);
+        } catch (bundleErr) {
+            console.warn(`${LOG} Update bundle path failed, falling back to direct JS:`, bundleErr.message || bundleErr);
+        }
 
         for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
             try {
@@ -525,6 +578,10 @@ export const SubPluginManager = {
 
         console.log(`${LOG} Parsed: name=${parsedName} ver=${parsedVersion} api=${parsedApiVersion} args=${Object.keys(parsedArgs).length}`);
 
+        if (remoteVersion && parsedVersion !== remoteVersion) {
+            return { ok: false, error: `버전 불일치: 기대 ${remoteVersion}, 실제 ${parsedVersion}` };
+        }
+
         // ── Step 3: Write to RisuAI DB — preserve existing settings ──
         try {
             const db = await Risu.getDatabase();
@@ -541,6 +598,14 @@ export const SubPluginManager = {
             }
 
             const existing = db.plugins[existingIdx];
+            const currentInstalledVersion = existing.versionOfPlugin || CPM_VERSION;
+            const installDirection = this.compareVersions(currentInstalledVersion, parsedVersion);
+            if (installDirection === 0) {
+                return { ok: false, error: `이미 같은 버전입니다: ${parsedVersion}` };
+            }
+            if (installDirection < 0) {
+                return { ok: false, error: `다운그레이드 차단: 현재 ${currentInstalledVersion} > 다운로드 ${parsedVersion}` };
+            }
             const oldRealArg = existing.realArg || {};
 
             // Merge: keep existing values for matching arg types, add defaults for new args
@@ -582,7 +647,7 @@ export const SubPluginManager = {
             try {
                 await Risu.pluginStorage.setItem('cpm_last_main_update_flush', JSON.stringify({
                     ts: Date.now(),
-                    from: CPM_VERSION,
+                    from: currentInstalledVersion,
                     to: parsedVersion,
                 }));
                 console.log(`${LOG} Autosave flush marker written to pluginStorage.`);
@@ -596,11 +661,11 @@ export const SubPluginManager = {
             console.log(`${LOG} Waiting for RisuAI autosave flush before showing success...`);
             await this._waitForMainPluginPersistence();
 
-            console.log(`${LOG} ✓ Successfully applied main plugin update: ${CPM_VERSION} → ${parsedVersion}`);
+            console.log(`${LOG} ✓ Successfully applied main plugin update: ${currentInstalledVersion} → ${parsedVersion}`);
             console.log(`${LOG}   Settings preserved: ${Object.keys(mergedRealArg).length} args (${Object.keys(oldRealArg).length} existed, ${Object.keys(parsedArgs).length} in new version)`);
 
             // Show success notification
-            await this._showMainAutoUpdateResult(CPM_VERSION, parsedVersion, changes || '', true);
+            await this._showMainAutoUpdateResult(currentInstalledVersion, parsedVersion, changes || '', true);
 
             return { ok: true };
         } catch (e) {
@@ -628,7 +693,7 @@ export const SubPluginManager = {
      * @returns {Promise<{ok: boolean, error?: string}>}
      */
     async safeMainPluginUpdate(remoteVersion, changes) {
-        const dl = await this._downloadMainPluginCode();
+        const dl = await this._downloadMainPluginCode(remoteVersion);
         if (!dl.ok) {
             console.error(`[CPM SafeUpdate] Download failed: ${dl.error}`);
             await this._showMainAutoUpdateResult(CPM_VERSION, remoteVersion, changes || '', false, dl.error);
