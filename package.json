@@ -1,7 +1,7 @@
 {
   "name": "cupcake-provider-manager",
   "type": "module",
-  "version": "1.19.10",
+  "version": "1.19.11",
   "private": true,
   "scripts": {
     "lint": "eslint src tests",

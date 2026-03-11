@@ -220,6 +220,10 @@ describe('safeMainPluginUpdate', () => {
         expect(result.ok).toBe(true);
         expect(mockSetDatabaseLite).toHaveBeenCalledTimes(1);
         expect(SubPluginManager._waitForMainPluginPersistence).toHaveBeenCalledTimes(1);
+        expect(mockPluginStorage.setItem).toHaveBeenCalledWith(
+            'cpm_last_main_update_flush',
+            expect.any(String)
+        );
 
         const savedDb = mockSetDatabaseLite.mock.calls[0][0];
         const updated = savedDb.plugins[0];

@@ -571,6 +571,25 @@ export const SubPluginManager = {
             db.plugins[existingIdx] = updatedPlugin;
             await Risu.setDatabaseLite(db);
 
+            try {
+                const verifyDb = await Risu.getDatabase();
+                const verifyPlugin = verifyDb?.plugins?.find?.(p => p.name === PLUGIN_NAME);
+                console.log(`${LOG} In-memory verify: version=${verifyPlugin?.versionOfPlugin || 'missing'} script=${verifyPlugin?.script ? 'present' : 'missing'}`);
+            } catch (verifyErr) {
+                console.warn(`${LOG} In-memory verify failed:`, verifyErr.message || verifyErr);
+            }
+
+            try {
+                await Risu.pluginStorage.setItem('cpm_last_main_update_flush', JSON.stringify({
+                    ts: Date.now(),
+                    from: CPM_VERSION,
+                    to: parsedVersion,
+                }));
+                console.log(`${LOG} Autosave flush marker written to pluginStorage.`);
+            } catch (flushErr) {
+                console.warn(`${LOG} Autosave flush marker write failed:`, flushErr.message || flushErr);
+            }
+
             // RisuAI persists DB changes asynchronously via its autosave loop.
             // If we tell the user to reload immediately, a fast refresh can happen
             // before the updated plugin script is flushed to storage.
