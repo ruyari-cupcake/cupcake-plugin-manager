@@ -200,6 +200,7 @@ describe('safeMainPluginUpdate', () => {
         mockSetDatabaseLite.mockReset();
         // Suppress toast in tests
         vi.spyOn(SubPluginManager, '_showMainAutoUpdateResult').mockResolvedValue();
+        vi.spyOn(SubPluginManager, '_waitForMainPluginPersistence').mockResolvedValue();
     });
 
     it('downloads, validates, and installs plugin preserving existing settings', async () => {
@@ -218,6 +219,7 @@ describe('safeMainPluginUpdate', () => {
 
         expect(result.ok).toBe(true);
         expect(mockSetDatabaseLite).toHaveBeenCalledTimes(1);
+        expect(SubPluginManager._waitForMainPluginPersistence).toHaveBeenCalledTimes(1);
 
         const savedDb = mockSetDatabaseLite.mock.calls[0][0];
         const updated = savedDb.plugins[0];

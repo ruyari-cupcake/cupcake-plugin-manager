@@ -571,6 +571,12 @@ export const SubPluginManager = {
             db.plugins[existingIdx] = updatedPlugin;
             await Risu.setDatabaseLite(db);
 
+            // RisuAI persists DB changes asynchronously via its autosave loop.
+            // If we tell the user to reload immediately, a fast refresh can happen
+            // before the updated plugin script is flushed to storage.
+            console.log(`${LOG} Waiting for RisuAI autosave flush before showing success...`);
+            await this._waitForMainPluginPersistence();
+
             console.log(`${LOG} ✓ Successfully applied main plugin update: ${CPM_VERSION} → ${parsedVersion}`);
             console.log(`${LOG}   Settings preserved: ${Object.keys(mergedRealArg).length} args (${Object.keys(oldRealArg).length} existed, ${Object.keys(parsedArgs).length} in new version)`);
 
@@ -581,6 +587,17 @@ export const SubPluginManager = {
         } catch (e) {
             return { ok: false, error: `DB 저장 실패: ${e.message || e}` };
         }
+    },
+
+    /**
+     * RisuAI's plugin `setDatabaseLite()` updates in-memory DB immediately,
+     * but persistence to storage happens on the host app's debounced autosave loop.
+     * Give that loop enough time to flush before telling the user to reload.
+     *
+     * @returns {Promise<void>}
+     */
+    async _waitForMainPluginPersistence() {
+        await new Promise(resolve => setTimeout(resolve, 3500));
     },
 
     /**
@@ -650,7 +667,7 @@ export const SubPluginManager = {
                         <div style="flex:1;min-width:0">
                             <div style="font-size:13px;font-weight:600;color:#6ee7b7">✓ 메인 플러그인 자동 업데이트 완료</div>
                             <div style="font-size:11px;color:#9ca3af;margin-top:2px">Cupcake PM <span style="color:#6ee7b7">${escHtml(localVersion)} → ${escHtml(remoteVersion)}</span>${changesHtml}</div>
-                            <div style="font-size:11px;color:#fcd34d;margin-top:4px;font-weight:500">⚡ 페이지를 새로고침하면 적용됩니다</div>
+                            <div style="font-size:11px;color:#fcd34d;margin-top:4px;font-weight:500">⚡ 3~4초 정도 기다린 뒤 새로고침하면 적용됩니다</div>
                         </div>
                     </div>`;
             } else {
