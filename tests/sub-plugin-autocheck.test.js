@@ -205,15 +205,16 @@ describe('safeMainPluginUpdate', () => {
 
     it('downloads, validates, and installs plugin preserving existing settings', async () => {
         const existingPlugin = makeExistingPlugin();
+        const existingDb = {
+            plugins: [existingPlugin],
+        };
         mockRisuFetch.mockResolvedValueOnce({ status: 500, data: '' });
         mockNativeFetch.mockResolvedValue({
             ok: true, status: 200,
             text: async () => VALID_PLUGIN_CODE,
             headers: { get: (k) => k === 'content-length' ? String(new TextEncoder().encode(VALID_PLUGIN_CODE).byteLength) : null },
         });
-        mockGetDatabase.mockResolvedValue({
-            plugins: [existingPlugin],
-        });
+        mockGetDatabase.mockResolvedValue(existingDb);
         mockSetDatabaseLite.mockResolvedValue(undefined);
 
         const result = await SubPluginManager.safeMainPluginUpdate('1.20.0');
@@ -228,6 +229,9 @@ describe('safeMainPluginUpdate', () => {
 
         const savedDb = mockSetDatabaseLite.mock.calls[0][0];
         const updated = savedDb.plugins[0];
+        expect(savedDb).toEqual({ plugins: expect.any(Array) });
+        expect(savedDb).not.toBe(existingDb);
+        expect(savedDb.plugins).not.toBe(existingDb.plugins);
         expect(updated.name).toBe('Cupcake_Provider_Manager');
         expect(updated.versionOfPlugin).toBe('1.20.0');
         expect(updated.version).toBe('3.0');

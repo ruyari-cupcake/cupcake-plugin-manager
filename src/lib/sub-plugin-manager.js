@@ -633,8 +633,16 @@ export const SubPluginManager = {
                 enabled: existing.enabled !== false, // preserve enabled state
             };
 
-            db.plugins[existingIdx] = updatedPlugin;
-            await Risu.setDatabaseLite(db);
+            // IMPORTANT: replace the plugins array with a fresh reference.
+            // RisuAI's autosave dirty-tracker watches top-level DB fields and can
+            // miss an in-place nested mutation coming from plugin code. If we only
+            // mutate db.plugins[existingIdx] and reuse the same array/object,
+            // the update may remain in-memory until some unrelated user action
+            // dirties the DB. Writing a new plugins array makes the host notice
+            // the change immediately and persist it on the next autosave cycle.
+            const nextPlugins = db.plugins.slice();
+            nextPlugins[existingIdx] = updatedPlugin;
+            await Risu.setDatabaseLite({ plugins: nextPlugins });
 
             try {
                 const verifyDb = await Risu.getDatabase();

@@ -1,7 +1,7 @@
 //@name Cupcake_Provider_Manager
 //@display-name Cupcake Provider Manager
 //@api 3.0
-//@version 1.19.13
+//@version 1.19.14
 //@update-url https://cupcake-plugin-manager-test.vercel.app/api/main-plugin
 
 // ==========================================
@@ -128,7 +128,7 @@ var CupcakeProviderManager = (function (exports) {
     /** @typedef {Window & typeof globalThis & { risuai?: any, Risuai?: any }} RisuWindow */
 
     // ─── Constants ───
-    const CPM_VERSION = '1.19.13';
+    const CPM_VERSION = '1.19.14';
 
     // ─── RisuAI Global Reference ───
     const risuWindow = typeof window !== 'undefined'
@@ -4602,8 +4602,16 @@ var CupcakeProviderManager = (function (exports) {
                     enabled: existing.enabled !== false, // preserve enabled state
                 };
 
-                db.plugins[existingIdx] = updatedPlugin;
-                await Risu.setDatabaseLite(db);
+                // IMPORTANT: replace the plugins array with a fresh reference.
+                // RisuAI's autosave dirty-tracker watches top-level DB fields and can
+                // miss an in-place nested mutation coming from plugin code. If we only
+                // mutate db.plugins[existingIdx] and reuse the same array/object,
+                // the update may remain in-memory until some unrelated user action
+                // dirties the DB. Writing a new plugins array makes the host notice
+                // the change immediately and persist it on the next autosave cycle.
+                const nextPlugins = db.plugins.slice();
+                nextPlugins[existingIdx] = updatedPlugin;
+                await Risu.setDatabaseLite({ plugins: nextPlugins });
 
                 try {
                     const verifyDb = await Risu.getDatabase();
