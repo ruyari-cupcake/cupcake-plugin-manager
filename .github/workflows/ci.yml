@@ -28,6 +28,9 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      - name: Generate CSS (required by typecheck)
+        run: npm run build:css
+
       - name: Typecheck
         run: npm run typecheck
 
