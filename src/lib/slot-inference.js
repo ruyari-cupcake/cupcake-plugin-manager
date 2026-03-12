@@ -1,3 +1,4 @@
+// @ts-check
 /**
  * slot-inference.js — Infer which auxiliary slot a request is targeting.
  * Uses model assignment matching + prompt content heuristics for disambiguation.
@@ -71,7 +72,7 @@ export const SLOT_HEURISTICS = {
  * @returns {number} Score (higher = more confident match)
  */
 export function scoreSlotHeuristic(promptText, slotName) {
-    const heuristic = SLOT_HEURISTICS[slotName];
+    const heuristic = SLOT_HEURISTICS[/** @type {keyof typeof SLOT_HEURISTICS} */ (slotName)];
     if (!heuristic || !promptText) return 0;
     let score = 0;
     for (const pattern of heuristic.patterns) {
@@ -99,8 +100,8 @@ export function scoreSlotHeuristic(promptText, slotName) {
  *
  * When heuristics fail, Risu's native parameter values are used as-is.
  *
- * @param {Object} activeModelDef - Model definition with uniqueId
- * @param {Object} args - Request arguments (contains prompt_chat)
+ * @param {Record<string, any>} activeModelDef - Model definition with uniqueId
+ * @param {Record<string, any>} args - Request arguments (contains prompt_chat)
  * @returns {Promise<{slot: string, heuristicConfirmed: boolean}>}
  *          slot = 'chat' | 'translation' | 'emotion' | 'memory' | 'other'
  *          heuristicConfirmed = true when the slot was confirmed via content analysis

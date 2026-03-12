@@ -1,3 +1,4 @@
+// @ts-check
 /**
  * response-parsers.js — Non-streaming response parsers for all providers.
  * Pure functions that extract text content from API JSON responses.
@@ -9,7 +10,7 @@ import { ThoughtSignatureCache } from './format-gemini.js';
 /**
  * Parse OpenAI Chat Completions non-streaming response.
  * Handles reasoning_content (o-series), reasoning (OpenRouter), DeepSeek <think> blocks.
- * @param {Object} data - Parsed JSON response
+ * @param {Record<string, any>} data - Parsed JSON response
  * @param {string} [_requestId] - Optional API View request ID
  * @returns {{ success: boolean, content: string }}
  */
@@ -41,7 +42,8 @@ export function parseOpenAINonStreamingResponse(data, _requestId) {
     out += content;
 
     if (data.usage) {
-        _setTokenUsage(_requestId, _normalizeTokenUsage(data.usage, 'openai'), false);
+        const _tu = _normalizeTokenUsage(data.usage, 'openai');
+        if (_tu) _setTokenUsage(/** @type {string} */ (_requestId), _tu, false);
     }
     return { success: !!out, content: out || '[OpenAI] Empty response' };
 }
@@ -49,7 +51,7 @@ export function parseOpenAINonStreamingResponse(data, _requestId) {
 /**
  * Parse OpenAI Responses API non-streaming response (GPT-5.4+).
  * Extracts text from output[].content[].text and reasoning from output[].summary[].
- * @param {Object} data - Parsed JSON response
+ * @param {Record<string, any>} data - Parsed JSON response
  * @param {string} [_requestId] - Optional API View request ID
  * @returns {{ success: boolean, content: string }}
  */
@@ -64,8 +66,8 @@ export function parseResponsesAPINonStreamingResponse(data, _requestId) {
         if (!item || typeof item !== 'object') continue;
         if (item.type === 'reasoning' && Array.isArray(item.summary)) {
             const reasoningText = item.summary
-                .filter(s => s && s.type === 'summary_text')
-                .map(s => s.text || '')
+                .filter(/** @type {(s: any) => boolean} */ (s) => s && s.type === 'summary_text')
+                .map(/** @type {(s: any) => string} */ (s) => s.text || '')
                 .join('');
             if (reasoningText) out += '<Thoughts>\n' + reasoningText + '\n</Thoughts>\n';
         }
@@ -78,7 +80,8 @@ export function parseResponsesAPINonStreamingResponse(data, _requestId) {
     }
 
     if (data.usage) {
-        _setTokenUsage(_requestId, _normalizeTokenUsage(data.usage, 'openai'), false);
+        const _tu = _normalizeTokenUsage(data.usage, 'openai');
+        if (_tu) _setTokenUsage(/** @type {string} */ (_requestId), _tu, false);
     }
     return { success: !!out, content: out || '[Responses API] Empty response' };
 }
@@ -86,8 +89,8 @@ export function parseResponsesAPINonStreamingResponse(data, _requestId) {
 /**
  * Parse Gemini generateContent non-streaming response.
  * Handles safety blocks, thoughts, thought_signature caching.
- * @param {Object} data - Parsed JSON response
- * @param {Object} [config] - { useThoughtSignature }
+ * @param {Record<string, any>} data - Parsed JSON response
+ * @param {Record<string, any>} [config] - { useThoughtSignature }
  * @param {string} [_requestId] - Optional API View request ID
  * @returns {{ success: boolean, content: string }}
  */
@@ -126,7 +129,8 @@ export function parseGeminiNonStreamingResponse(data, config = {}, _requestId) {
         ThoughtSignatureCache.save(result, extractedSignature);
     }
     if (data.usageMetadata) {
-        _setTokenUsage(_requestId, _normalizeTokenUsage(data.usageMetadata, 'gemini'), false);
+        const _tu = _normalizeTokenUsage(data.usageMetadata, 'gemini');
+        if (_tu) _setTokenUsage(/** @type {string} */ (_requestId), _tu, false);
     }
     return { success: !!result, content: result || '[Gemini] Empty response' };
 }
@@ -134,8 +138,8 @@ export function parseGeminiNonStreamingResponse(data, config = {}, _requestId) {
 /**
  * Parse Claude (Anthropic) non-streaming response.
  * Handles thinking/redacted_thinking blocks.
- * @param {Object} data - Parsed JSON response
- * @param {Object} [_config] - Unused, reserved for future options
+ * @param {Record<string, any>} data - Parsed JSON response
+ * @param {Record<string, any>} [_config] - Unused, reserved for future options
  * @param {string} [_requestId] - Optional API View request ID
  * @returns {{ success: boolean, content: string }}
  */
@@ -173,10 +177,11 @@ export function parseClaudeNonStreamingResponse(data, _config = {}, _requestId) 
 
     if (inThinking) result += '</Thoughts>\n\n';
     if (data.usage) {
-        _setTokenUsage(_requestId, _normalizeTokenUsage(data.usage, 'anthropic', {
+        const _tu = _normalizeTokenUsage(data.usage, 'anthropic', {
             anthropicHasThinking: hasThinking,
             anthropicVisibleText: visibleText,
-        }), false);
+        });
+        if (_tu) _setTokenUsage(/** @type {string} */ (_requestId), _tu, false);
     }
     return { success: !!result, content: result || '[Claude] Empty response' };
 }

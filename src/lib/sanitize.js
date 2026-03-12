@@ -59,7 +59,7 @@ export function stripStaleAutoCaption(text, message) {
  * Extract and normalize message payload into { text, multimodals }.
  * Handles RisuAI multimodals array, OpenAI content parts (image_url, input_audio, input_image),
  * Anthropic image blocks, and Gemini inlineData.
- * @param {Object} message
+ * @param {Record<string, any>} message
  * @returns {NormalizedPayload}
  */
 export function extractNormalizedMessagePayload(message) {
@@ -147,8 +147,8 @@ export function extractNormalizedMessagePayload(message) {
  * Deep-sanitize messages array: remove null/undefined entries,
  * strip internal RisuAI tags, filter messages with empty content.
  * Returns a NEW array — never mutates the input.
- * @param {Array<Object>} messages
- * @returns {Array<Object>}
+ * @param {Array<Record<string, any>>} messages
+ * @returns {Array<Record<string, any>>}
  */
 export function sanitizeMessages(messages) {
     if (!Array.isArray(messages)) return [];
@@ -181,7 +181,7 @@ export function sanitizeBodyJSON(jsonStr) {
         const obj = JSON.parse(jsonStr);
         if (Array.isArray(obj.messages)) {
             const before = obj.messages.length;
-            obj.messages = obj.messages.filter(m => {
+            obj.messages = obj.messages.filter((/** @type {any} */ m) => {
                 if (m == null || typeof m !== 'object') return false;
                 if (!hasNonEmptyMessageContent(m.content) && !hasAttachedMultimodals(m)) return false;
                 if (typeof m.role !== 'string' || !m.role) return false;
@@ -194,7 +194,7 @@ export function sanitizeBodyJSON(jsonStr) {
         }
         if (Array.isArray(obj.contents)) {
             const before = obj.contents.length;
-            obj.contents = obj.contents.filter(m => m != null && typeof m === 'object');
+            obj.contents = obj.contents.filter((/** @type {any} */ m) => m != null && typeof m === 'object');
             if (obj.contents.length < before) {
                 console.warn(`[Cupcake PM] sanitizeBodyJSON: removed ${before - obj.contents.length} null entries from contents`);
             }
@@ -211,7 +211,7 @@ export function sanitizeBodyJSON(jsonStr) {
         if (typeof jsonStr === 'string' && !jsonStr.trimStart().startsWith('{') && !jsonStr.trimStart().startsWith('[')) {
             return jsonStr;
         }
-        console.error('[Cupcake PM] sanitizeBodyJSON: JSON parse/stringify failed:', e.message);
+        console.error('[Cupcake PM] sanitizeBodyJSON: JSON parse/stringify failed:', /** @type {Error} */ (e).message);
         return jsonStr;
     }
 }
@@ -236,7 +236,7 @@ export function stripThoughtDisplayContent(text) {
         const afterLastMarker = cleaned.substring(lastMarkerIdx);
         const contentMatch = afterLastMarker.match(/\n{3,}\s*(?=[^\s>\\])/);
         if (contentMatch) {
-            cleaned = afterLastMarker.substring(contentMatch.index).trim();
+            cleaned = afterLastMarker.substring(contentMatch.index ?? 0).trim();
         } else {
             cleaned = '';
         }

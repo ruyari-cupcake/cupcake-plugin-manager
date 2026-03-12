@@ -553,6 +553,78 @@ describe('UI regression — settings export/import', () => {
         expect(globalThis.alert).toHaveBeenCalledWith('설정을 성공적으로 불러왔습니다!');
         expect(reopen).toHaveBeenCalledTimes(1);
     });
+
+    it('shows an alert and does not reopen when imported JSON is invalid', async () => {
+        const setVal = vi.fn();
+        const reopen = vi.fn();
+
+        class MockFileReader {
+            readAsText(file) {
+                this.onload({ target: { result: file.__text } });
+            }
+        }
+        Object.defineProperty(globalThis, 'FileReader', {
+            configurable: true,
+            writable: true,
+            value: MockFileReader,
+        });
+
+        const originalCreateElement = document.createElement.bind(document);
+        let createdInput = null;
+        document.createElement = ((tagName, options) => {
+            const el = originalCreateElement(tagName, options);
+            if (String(tagName).toLowerCase() === 'input' && !createdInput) createdInput = el;
+            return el;
+        });
+
+        initExportImport(setVal, reopen);
+        document.getElementById('cpm-import-btn').click();
+        createdInput.onchange({
+            target: {
+                files: [{ __text: '{invalid json' }],
+            },
+        });
+        await flushUi();
+
+        document.createElement = originalCreateElement;
+        expect(setVal).not.toHaveBeenCalled();
+        expect(reopen).not.toHaveBeenCalled();
+        expect(globalThis.alert).toHaveBeenCalledWith(expect.stringContaining('설정 파일 읽기 오류:'));
+    });
+
+    it('shows an alert when imported file data is not a string payload', async () => {
+        const setVal = vi.fn();
+        const reopen = vi.fn();
+
+        class MockFileReader {
+            readAsText() {
+                this.onload({ target: { result: new ArrayBuffer(8) } });
+            }
+        }
+        Object.defineProperty(globalThis, 'FileReader', {
+            configurable: true,
+            writable: true,
+            value: MockFileReader,
+        });
+
+        const originalCreateElement = document.createElement.bind(document);
+        let createdInput = null;
+        document.createElement = ((tagName, options) => {
+            const el = originalCreateElement(tagName, options);
+            if (String(tagName).toLowerCase() === 'input' && !createdInput) createdInput = el;
+            return el;
+        });
+
+        initExportImport(setVal, reopen);
+        document.getElementById('cpm-import-btn').click();
+        createdInput.onchange({ target: { files: [{}] } });
+        await flushUi();
+
+        document.createElement = originalCreateElement;
+        expect(setVal).not.toHaveBeenCalled();
+        expect(reopen).not.toHaveBeenCalled();
+        expect(globalThis.alert).toHaveBeenCalledWith(expect.stringContaining('설정 파일 형식이 올바르지 않습니다.'));
+    });
 });
 
 describe('UI regression — API view panel', () => {
@@ -631,5 +703,79 @@ describe('UI regression — API view panel', () => {
         initApiViewPanel();
         document.getElementById('cpm-api-view-btn').click();
         expect(document.getElementById('cpm-api-view-content').textContent).toContain('아직 API 요청 기록이 없습니다');
+    });
+
+    it('toggles the API panel closed when the open button is clicked twice', () => {
+        mockApiState.requests = [{
+            id: 'req-1',
+            timestamp: '2026-03-07T10:00:00.000Z',
+            modelName: 'Model',
+            response: 'ok',
+            status: 200,
+        }];
+
+        initApiViewPanel();
+        const btn = document.getElementById('cpm-api-view-btn');
+        const panel = document.getElementById('cpm-api-view-panel');
+
+        btn.click();
+        expect(panel.classList.contains('hidden')).toBe(false);
+        btn.click();
+        expect(panel.classList.contains('hidden')).toBe(true);
+    });
+
+    it('renders param-only entries without HTTP header details and handles missing selected request', () => {
+        mockApiState.requests = [{
+            id: 'req-params-only',
+            timestamp: '2026-03-07T12:00:00.000Z',
+            modelName: '[Custom] Params Only',
+            body: { temperature: 0.7 },
+            response: { ok: true },
+            status: null,
+        }];
+
+        initApiViewPanel();
+        document.getElementById('cpm-api-view-btn').click();
+
+        const selector = document.getElementById('cpm-api-view-selector');
+        const content = document.getElementById('cpm-api-view-content');
+
+        expect(content.innerHTML).toContain('📊 Request Params');
+        expect(content.innerHTML).not.toContain('📤 Request Headers');
+        expect(content.innerHTML).toContain('text-yellow-400');
+
+        selector.value = 'missing-id';
+        selector.dispatchEvent(new Event('change', { bubbles: true }));
+        expect(content.textContent).toContain('선택한 요청 데이터가 없습니다.');
+    });
+
+    it('redacts short auth-like header values and formats object responses safely', () => {
+        mockApiState.requests = [{
+            id: 'req-short-auth',
+            timestamp: '2026-03-07T12:30:00.000Z',
+            modelName: '[OpenAI] ShortAuth',
+            url: 'https://api.example.com/v1/chat',
+            method: 'POST',
+            requestHeaders: { 'x-api-key': 'abc123' },
+            requestBody: { prompt: 'hi' },
+            response: { ok: true, nested: { value: 1 } },
+            status: 204,
+        }];
+
+        initApiViewPanel();
+        document.getElementById('cpm-api-view-btn').click();
+
+        const content = document.getElementById('cpm-api-view-content');
+        expect(content.innerHTML).toContain('***');
+        expect(content.innerHTML).toContain('nested');
+        expect(content.innerHTML).toContain('text-green-400');
+    });
+
+    it('returns early without crashing when required API view elements are missing', () => {
+        document.body.innerHTML = '<button id="cpm-api-view-btn">Open API View</button>';
+
+        expect(() => initApiViewPanel()).not.toThrow();
+        document.getElementById('cpm-api-view-btn').click();
+        expect(true).toBe(true);
     });
 });

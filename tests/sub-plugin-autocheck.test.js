@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { MAIN_UPDATE_URL } from '../src/lib/endpoints.js';
 
 const { mockPluginStorage, mockRisuFetch, mockGetRootDocument, mockNativeFetch, mockGetDatabase, mockSetDatabaseLite } = vi.hoisted(() => ({
-    mockPluginStorage: { getItem: vi.fn(), setItem: vi.fn() },
+    mockPluginStorage: { getItem: vi.fn(), setItem: vi.fn(), removeItem: vi.fn() },
     mockRisuFetch: vi.fn(),
     mockGetRootDocument: vi.fn(async () => null),
     mockNativeFetch: vi.fn(),
@@ -30,7 +31,7 @@ vi.mock('../src/lib/shared-state.js', () => ({
 
 vi.mock('../src/lib/csp-exec.js', () => ({ _executeViaScriptTag: vi.fn() }));
 
-import { SubPluginManager } from '../src/lib/sub-plugin-manager.js';
+import { SubPluginManager, _computeSHA256 } from '../src/lib/sub-plugin-manager.js';
 
 describe('SubPluginManager auto update checks', () => {
     beforeEach(() => {
@@ -40,6 +41,8 @@ describe('SubPluginManager auto update checks', () => {
         delete window._cpmVersionChecked;
         delete window._cpmMainVersionChecked;
         delete window._cpmMainVersionFromManifest;
+        delete window._cpmMainUpdateCompletedThisBoot;
+        SubPluginManager._mainUpdateInFlight = null;
         SubPluginManager.plugins = [{
             id: 'sp1',
             name: 'Alpha',
@@ -52,6 +55,7 @@ describe('SubPluginManager auto update checks', () => {
         SubPluginManager._pendingUpdateNames = [];
         mockPluginStorage.getItem.mockResolvedValue(null);
         mockPluginStorage.setItem.mockResolvedValue(undefined);
+        mockPluginStorage.removeItem.mockResolvedValue(undefined);
     });
 
     afterEach(() => {
@@ -82,6 +86,10 @@ describe('SubPluginManager auto update checks', () => {
 
         expect(SubPluginManager._pendingUpdateNames).toEqual(['Alpha']);
         expect(toastSpy).toHaveBeenCalledWith([expect.objectContaining({ name: 'Alpha', remoteVersion: '1.1.0' })]);
+        expect(mockPluginStorage.setItem).toHaveBeenCalledWith(
+            SubPluginManager._MAIN_UPDATE_RETRY_STORAGE_KEY,
+            expect.stringContaining('"version":"1.20.0"')
+        );
         expect(safeUpdateSpy).toHaveBeenCalledWith('1.20.0', 'main');
     });
 
@@ -131,7 +139,55 @@ describe('SubPluginManager auto update checks', () => {
             '1.20.1',
             'better stability'
         );
+        expect(mockPluginStorage.setItem).toHaveBeenCalledWith(
+            SubPluginManager._MAIN_UPDATE_RETRY_STORAGE_KEY,
+            expect.stringContaining('"version":"1.20.1"')
+        );
         expect(mockPluginStorage.setItem).toHaveBeenCalledWith(SubPluginManager._MAIN_VERSION_CHECK_STORAGE_KEY, expect.any(String));
+    });
+
+    it('retryPendingMainPluginUpdateOnBoot is a no-op when no marker exists', async () => {
+        const safeUpdateSpy = vi.spyOn(SubPluginManager, 'safeMainPluginUpdate').mockResolvedValue({ ok: true });
+
+        const result = await SubPluginManager.retryPendingMainPluginUpdateOnBoot();
+
+        expect(result).toBe(false);
+        expect(safeUpdateSpy).not.toHaveBeenCalled();
+    });
+
+    it('retryPendingMainPluginUpdateOnBoot retries once when marker exists', async () => {
+        mockPluginStorage.getItem.mockImplementation(async (key) => {
+            if (key === SubPluginManager._MAIN_UPDATE_RETRY_STORAGE_KEY) {
+                return JSON.stringify({ version: '1.20.1', changes: 'retry me', attempts: 0, lastAttemptTs: 0 });
+            }
+            return null;
+        });
+        mockGetDatabase.mockResolvedValue({ plugins: [makeExistingPlugin()] });
+        const safeUpdateSpy = vi.spyOn(SubPluginManager, 'safeMainPluginUpdate').mockResolvedValue({ ok: false, error: 'network' });
+
+        const result = await SubPluginManager.retryPendingMainPluginUpdateOnBoot();
+
+        expect(result).toBe(true);
+        expect(safeUpdateSpy).toHaveBeenCalledWith('1.20.1', 'retry me');
+        expect(mockPluginStorage.setItem).toHaveBeenCalledWith(
+            SubPluginManager._MAIN_UPDATE_RETRY_STORAGE_KEY,
+            expect.stringContaining('"attempts":1')
+        );
+    });
+
+    it('retryPendingMainPluginUpdateOnBoot clears marker when target is already installed', async () => {
+        mockPluginStorage.getItem.mockImplementation(async (key) => {
+            if (key === SubPluginManager._MAIN_UPDATE_RETRY_STORAGE_KEY) {
+                return JSON.stringify({ version: '1.19.6', changes: 'done', attempts: 1, lastAttemptTs: 0 });
+            }
+            return null;
+        });
+        mockGetDatabase.mockResolvedValue({ plugins: [makeExistingPlugin()] });
+
+        const result = await SubPluginManager.retryPendingMainPluginUpdateOnBoot();
+
+        expect(result).toBe(true);
+        expect(mockPluginStorage.removeItem).toHaveBeenCalledWith(SubPluginManager._MAIN_UPDATE_RETRY_STORAGE_KEY);
     });
 
     it('checkMainPluginVersionQuiet falls back to safeMainPluginUpdate if direct install fails', async () => {
@@ -165,7 +221,7 @@ const VALID_PLUGIN_CODE = [
     '//@display-name Cupcake Provider Manager',
     '//@api 3.0',
     '//@version 1.20.0',
-    '//@update-url https://cupcake-plugin-manager-test.vercel.app/api/main-plugin',
+    `//@update-url ${MAIN_UPDATE_URL}`,
     '//@arg cpm_openai_key string OpenAI API Key',
     '//@arg cpm_openai_model string OpenAI Model',
     '//@arg debug int {{name:디버그 모드}} {{checkbox:활성화}}',
@@ -186,7 +242,7 @@ function makeExistingPlugin() {
         version: '3.0',
         customLink: [],
         versionOfPlugin: '1.19.6',
-        updateURL: 'https://cupcake-plugin-manager-test.vercel.app/api/main-plugin',
+        updateURL: MAIN_UPDATE_URL,
         enabled: true,
     };
 }
@@ -198,6 +254,9 @@ describe('safeMainPluginUpdate', () => {
         mockNativeFetch.mockReset();
         mockGetDatabase.mockReset();
         mockSetDatabaseLite.mockReset();
+        globalThis.window = globalThis.window || {};
+        delete window._cpmMainUpdateCompletedThisBoot;
+        SubPluginManager._mainUpdateInFlight = null;
         // Suppress toast in tests
         vi.spyOn(SubPluginManager, '_showMainAutoUpdateResult').mockResolvedValue();
         vi.spyOn(SubPluginManager, '_waitForMainPluginPersistence').mockResolvedValue();
@@ -226,6 +285,7 @@ describe('safeMainPluginUpdate', () => {
             'cpm_last_main_update_flush',
             expect.any(String)
         );
+        expect(mockPluginStorage.removeItem).toHaveBeenCalledWith(SubPluginManager._MAIN_UPDATE_RETRY_STORAGE_KEY);
 
         const savedDb = mockSetDatabaseLite.mock.calls[0][0];
         const updated = savedDb.plugins[0];
@@ -294,7 +354,7 @@ describe('safeMainPluginUpdate', () => {
     });
 
     it('prefers update bundle via risuFetch and skips static JS fallback when bundle is valid', async () => {
-        const hash = await SubPluginManager._computeSHA256?.(VALID_PLUGIN_CODE);
+        const hash = await _computeSHA256(VALID_PLUGIN_CODE);
         mockRisuFetch.mockResolvedValueOnce({
             status: 200,
             data: JSON.stringify({
@@ -380,5 +440,324 @@ describe('safeMainPluginUpdate', () => {
         expect(result.ok).toBe(false);
         expect(result.error).toContain('다운그레이드 차단');
         expect(mockSetDatabaseLite).not.toHaveBeenCalled();
+    });
+
+    it('skips redundant download when _cpmMainUpdateCompletedThisBoot is set', async () => {
+        window._cpmMainUpdateCompletedThisBoot = true;
+
+        const result = await SubPluginManager.safeMainPluginUpdate('1.20.0', 'changes');
+
+        expect(result.ok).toBe(true);
+        expect(mockNativeFetch).not.toHaveBeenCalled();
+        expect(mockRisuFetch).not.toHaveBeenCalled();
+        // Should still clear any pending marker
+        expect(mockPluginStorage.removeItem).toHaveBeenCalledWith(SubPluginManager._MAIN_UPDATE_RETRY_STORAGE_KEY);
+
+        delete window._cpmMainUpdateCompletedThisBoot;
+    });
+
+    it('suppresses failure toast for "이미 같은 버전" error', async () => {
+        const sameVersionCode = VALID_PLUGIN_CODE.replace('//@version 1.20.0', '//@version 1.19.6');
+        mockRisuFetch.mockResolvedValueOnce({ status: 500, data: '' });
+        mockNativeFetch.mockResolvedValue({
+            ok: true, status: 200,
+            text: async () => sameVersionCode,
+            headers: { get: () => null },
+        });
+        mockGetDatabase.mockResolvedValue({ plugins: [makeExistingPlugin()] });
+
+        const result = await SubPluginManager.safeMainPluginUpdate('1.19.6');
+
+        expect(result.ok).toBe(false);
+        expect(result.error).toContain('이미 같은 버전');
+        // Toast should NOT have been called — "same version" is a no-op, not a real error
+        expect(SubPluginManager._showMainAutoUpdateResult).not.toHaveBeenCalled();
+    });
+
+    it('clears pending marker on non-retriable error', async () => {
+        const wrongNameCode = VALID_PLUGIN_CODE.replace('Cupcake_Provider_Manager', 'Some_Other_Plugin');
+        mockRisuFetch.mockResolvedValueOnce({ status: 500, data: '' });
+        mockNativeFetch.mockResolvedValue({
+            ok: true, status: 200,
+            text: async () => wrongNameCode,
+            headers: { get: () => null },
+        });
+
+        const result = await SubPluginManager.safeMainPluginUpdate('1.20.0');
+
+        expect(result.ok).toBe(false);
+        expect(result.error).toContain('이름 불일치');
+        // Non-retriable error → marker should be cleared
+        expect(mockPluginStorage.removeItem).toHaveBeenCalledWith(SubPluginManager._MAIN_UPDATE_RETRY_STORAGE_KEY);
+    });
+
+    it('preserves pending marker on retriable (network) error', async () => {
+        // Both fetch paths fail → download error is retriable
+        mockRisuFetch.mockResolvedValue({ status: 500, data: '' });
+        mockNativeFetch.mockRejectedValue(new Error('network error'));
+
+        const result = await SubPluginManager.safeMainPluginUpdate('1.20.0');
+
+        expect(result.ok).toBe(false);
+        // Marker should NOT be cleared — network error is retriable
+        expect(mockPluginStorage.removeItem).not.toHaveBeenCalledWith(SubPluginManager._MAIN_UPDATE_RETRY_STORAGE_KEY);
+    });
+
+    it('deduplicates concurrent calls via _mainUpdateInFlight', async () => {
+        mockRisuFetch.mockResolvedValueOnce({ status: 500, data: '' });
+        mockNativeFetch.mockResolvedValue({
+            ok: true, status: 200,
+            text: async () => VALID_PLUGIN_CODE,
+            headers: { get: () => null },
+        });
+        mockGetDatabase.mockResolvedValue({ plugins: [makeExistingPlugin()] });
+        mockSetDatabaseLite.mockResolvedValue(undefined);
+
+        // Fire two concurrent calls
+        const [r1, r2] = await Promise.all([
+            SubPluginManager.safeMainPluginUpdate('1.20.0'),
+            SubPluginManager.safeMainPluginUpdate('1.20.0'),
+        ]);
+
+        expect(r1.ok).toBe(true);
+        expect(r2.ok).toBe(true);
+        // Only ONE download should have happened (second call joins the first)
+        expect(mockNativeFetch).toHaveBeenCalledTimes(1);
+    });
+});
+
+// ── Retry helpers unit tests ──
+
+describe('retry helper functions', () => {
+    beforeEach(() => {
+        vi.restoreAllMocks();
+        vi.clearAllMocks();
+        mockPluginStorage.getItem.mockResolvedValue(null);
+        mockPluginStorage.setItem.mockResolvedValue(undefined);
+        mockPluginStorage.removeItem.mockResolvedValue(undefined);
+        globalThis.window = globalThis.window || {};
+        delete window._cpmMainVersionChecked;
+        delete window._cpmMainVersionFromManifest;
+        delete window._cpmMainUpdateCompletedThisBoot;
+    });
+
+    // ── _isRetriableMainUpdateError ──
+
+    it('classifies unknown / network errors as retriable', () => {
+        expect(SubPluginManager._isRetriableMainUpdateError('')).toBe(true);
+        expect(SubPluginManager._isRetriableMainUpdateError(null)).toBe(true);
+        expect(SubPluginManager._isRetriableMainUpdateError('network timeout')).toBe(true);
+        expect(SubPluginManager._isRetriableMainUpdateError('다운로드 불완전: 50000B 중 1000B만 수신됨')).toBe(true);
+        expect(SubPluginManager._isRetriableMainUpdateError('DB 저장 실패: unknown')).toBe(true);
+    });
+
+    it('classifies permanent errors as non-retriable', () => {
+        expect(SubPluginManager._isRetriableMainUpdateError('이름 불일치: "X" ≠ "Y"')).toBe(false);
+        expect(SubPluginManager._isRetriableMainUpdateError('버전 불일치: 기대 1.20, 실제 1.19')).toBe(false);
+        expect(SubPluginManager._isRetriableMainUpdateError('API 버전이 3.0이 아닙니다: 2.0')).toBe(false);
+        expect(SubPluginManager._isRetriableMainUpdateError('다운그레이드 차단: 현재 1.20 > 다운로드 1.19')).toBe(false);
+        expect(SubPluginManager._isRetriableMainUpdateError('이미 같은 버전입니다: 1.20.0')).toBe(false);
+        expect(SubPluginManager._isRetriableMainUpdateError('플러그인을 DB에서 찾을 수 없습니다')).toBe(false);
+        expect(SubPluginManager._isRetriableMainUpdateError('플러그인 목록을 찾을 수 없습니다')).toBe(false);
+    });
+
+    // ── _readPendingMainUpdate ──
+
+    it('returns null when pluginStorage is empty', async () => {
+        expect(await SubPluginManager._readPendingMainUpdate()).toBeNull();
+    });
+
+    it('returns null and clears marker for corrupt JSON', async () => {
+        mockPluginStorage.getItem.mockResolvedValueOnce('{{not json}}');
+
+        const result = await SubPluginManager._readPendingMainUpdate();
+
+        expect(result).toBeNull();
+        // Should have attempted to clear the corrupt marker
+        expect(mockPluginStorage.removeItem).toHaveBeenCalledWith(SubPluginManager._MAIN_UPDATE_RETRY_STORAGE_KEY);
+    });
+
+    it('returns null and clears marker for object without version', async () => {
+        mockPluginStorage.getItem.mockResolvedValueOnce(JSON.stringify({ changes: 'x' }));
+
+        const result = await SubPluginManager._readPendingMainUpdate();
+
+        expect(result).toBeNull();
+        expect(mockPluginStorage.removeItem).toHaveBeenCalledWith(SubPluginManager._MAIN_UPDATE_RETRY_STORAGE_KEY);
+    });
+
+    it('parses valid marker correctly', async () => {
+        const marker = { version: '1.21.0', changes: 'new stuff', createdAt: 1000, attempts: 2, lastAttemptTs: 2000, lastError: 'oops' };
+        mockPluginStorage.getItem.mockResolvedValueOnce(JSON.stringify(marker));
+
+        const result = await SubPluginManager._readPendingMainUpdate();
+
+        expect(result).toEqual(marker);
+    });
+
+    // ── _clearPendingMainUpdate fallback ──
+
+    it('falls back to setItem("") when removeItem is not available', async () => {
+        // Temporarily make removeItem not a function
+        const origRemoveItem = mockPluginStorage.removeItem;
+        mockPluginStorage.removeItem = 'not-a-function';
+
+        await SubPluginManager._clearPendingMainUpdate();
+
+        expect(mockPluginStorage.setItem).toHaveBeenCalledWith(SubPluginManager._MAIN_UPDATE_RETRY_STORAGE_KEY, '');
+
+        // Restore
+        mockPluginStorage.removeItem = origRemoveItem;
+    });
+
+    // ── _rememberPendingMainUpdate ──
+
+    it('does nothing when version is empty', async () => {
+        await SubPluginManager._rememberPendingMainUpdate('', 'changes');
+        await SubPluginManager._rememberPendingMainUpdate(null, 'changes');
+
+        expect(mockPluginStorage.setItem).not.toHaveBeenCalled();
+    });
+
+    it('preserves existing attempts/timestamps for same version', async () => {
+        const existing = { version: '1.21.0', changes: 'old', createdAt: 500, attempts: 3, lastAttemptTs: 900, lastError: 'err' };
+        mockPluginStorage.getItem.mockResolvedValueOnce(JSON.stringify(existing));
+
+        await SubPluginManager._rememberPendingMainUpdate('1.21.0', 'new changes');
+
+        const written = JSON.parse(mockPluginStorage.setItem.mock.calls[0][1]);
+        expect(written.version).toBe('1.21.0');
+        expect(written.changes).toBe('new changes');  // changes can be updated
+        expect(written.createdAt).toBe(500);           // preserved
+        expect(written.attempts).toBe(3);              // preserved
+        expect(written.lastAttemptTs).toBe(900);       // preserved
+        expect(written.lastError).toBe('err');         // preserved
+    });
+
+    it('resets counters for different version', async () => {
+        const existing = { version: '1.20.0', changes: 'old', createdAt: 500, attempts: 3, lastAttemptTs: 900, lastError: 'err' };
+        mockPluginStorage.getItem.mockResolvedValueOnce(JSON.stringify(existing));
+
+        await SubPluginManager._rememberPendingMainUpdate('1.21.0', 'brand new');
+
+        const written = JSON.parse(mockPluginStorage.setItem.mock.calls[0][1]);
+        expect(written.version).toBe('1.21.0');
+        expect(written.changes).toBe('brand new');
+        expect(written.attempts).toBe(0);              // reset
+        expect(written.lastAttemptTs).toBe(0);          // reset
+        expect(written.lastError).toBe('');             // reset
+    });
+
+    // ── retryPendingMainPluginUpdateOnBoot — additional edge cases ──
+
+    it('retryBoot clears marker and returns false when max attempts exceeded', async () => {
+        mockPluginStorage.getItem.mockImplementation(async (key) => {
+            if (key === SubPluginManager._MAIN_UPDATE_RETRY_STORAGE_KEY) {
+                return JSON.stringify({ version: '1.21.0', changes: 'x', attempts: 2, lastAttemptTs: 0 });
+            }
+            return null;
+        });
+        mockGetDatabase.mockResolvedValue({ plugins: [makeExistingPlugin()] });
+        const safeUpdateSpy = vi.spyOn(SubPluginManager, 'safeMainPluginUpdate').mockResolvedValue({ ok: true });
+
+        const result = await SubPluginManager.retryPendingMainPluginUpdateOnBoot();
+
+        expect(result).toBe(false);
+        expect(safeUpdateSpy).not.toHaveBeenCalled();
+        expect(mockPluginStorage.removeItem).toHaveBeenCalledWith(SubPluginManager._MAIN_UPDATE_RETRY_STORAGE_KEY);
+    });
+
+    it('retryBoot returns false during cooldown without calling safeMainPluginUpdate', async () => {
+        const recentTs = Date.now() - 60000; // 1 min ago (well within 5 min cooldown)
+        mockPluginStorage.getItem.mockImplementation(async (key) => {
+            if (key === SubPluginManager._MAIN_UPDATE_RETRY_STORAGE_KEY) {
+                return JSON.stringify({ version: '1.21.0', changes: 'x', attempts: 1, lastAttemptTs: recentTs });
+            }
+            return null;
+        });
+        mockGetDatabase.mockResolvedValue({ plugins: [makeExistingPlugin()] });
+        const safeUpdateSpy = vi.spyOn(SubPluginManager, 'safeMainPluginUpdate').mockResolvedValue({ ok: true });
+
+        const result = await SubPluginManager.retryPendingMainPluginUpdateOnBoot();
+
+        expect(result).toBe(false);
+        expect(safeUpdateSpy).not.toHaveBeenCalled();
+    });
+
+    it('checkMainPluginVersionQuiet falls back when nativeFetch body read hangs', async () => {
+        vi.useFakeTimers();
+        mockNativeFetch.mockResolvedValue({
+            ok: true,
+            status: 200,
+            text: () => new Promise(() => {}),
+        });
+        mockRisuFetch.mockResolvedValue({
+            status: 200,
+            data: '// @version 1.20.1\n// @changes body-timeout fallback\nconsole.log("ok")',
+        });
+        const installSpy = vi.spyOn(SubPluginManager, '_validateAndInstallMainPlugin').mockResolvedValue({ ok: true });
+
+        const promise = SubPluginManager.checkMainPluginVersionQuiet();
+        await vi.advanceTimersByTimeAsync(20100);
+        await promise;
+
+        expect(installSpy).toHaveBeenCalledWith(
+            expect.any(String),
+            '1.20.1',
+            'body-timeout fallback'
+        );
+
+        vi.useRealTimers();
+    });
+
+    it('retryBoot records lastError after failed retry', async () => {
+        // Need to track setItem calls carefully — getItem needs to return
+        // updated values as the retry writes the marker multiple times.
+        let storedMarker = JSON.stringify({ version: '1.21.0', changes: 'x', attempts: 0, lastAttemptTs: 0, lastError: '' });
+        mockPluginStorage.getItem.mockImplementation(async (key) => {
+            if (key === SubPluginManager._MAIN_UPDATE_RETRY_STORAGE_KEY) return storedMarker;
+            return null;
+        });
+        mockPluginStorage.setItem.mockImplementation(async (key, value) => {
+            if (key === SubPluginManager._MAIN_UPDATE_RETRY_STORAGE_KEY) storedMarker = value;
+        });
+        mockGetDatabase.mockResolvedValue({ plugins: [makeExistingPlugin()] });
+        vi.spyOn(SubPluginManager, 'safeMainPluginUpdate').mockResolvedValue({ ok: false, error: 'timeout reached' });
+
+        await SubPluginManager.retryPendingMainPluginUpdateOnBoot();
+
+        const finalMarker = JSON.parse(storedMarker);
+        expect(finalMarker.attempts).toBe(1);
+        expect(finalMarker.lastError).toBe('timeout reached');
+    });
+
+    it('retryBoot handles pluginStorage.getItem throwing gracefully', async () => {
+        mockPluginStorage.getItem.mockRejectedValue(new Error('storage unavailable'));
+
+        const result = await SubPluginManager.retryPendingMainPluginUpdateOnBoot();
+
+        // Should not crash, just return false
+        expect(result).toBe(false);
+    });
+
+    it('sets _cpmMainUpdateCompletedThisBoot flag on successful install', async () => {
+        delete window._cpmMainUpdateCompletedThisBoot;
+        mockRisuFetch.mockResolvedValueOnce({ status: 500, data: '' });
+        mockNativeFetch.mockResolvedValue({
+            ok: true, status: 200,
+            text: async () => VALID_PLUGIN_CODE,
+            headers: { get: () => null },
+        });
+        mockGetDatabase.mockResolvedValue({ plugins: [makeExistingPlugin()] });
+        mockSetDatabaseLite.mockResolvedValue(undefined);
+        vi.spyOn(SubPluginManager, '_showMainAutoUpdateResult').mockResolvedValue();
+        vi.spyOn(SubPluginManager, '_waitForMainPluginPersistence').mockResolvedValue();
+
+        const result = await SubPluginManager.safeMainPluginUpdate('1.20.0');
+
+        expect(result.ok).toBe(true);
+        expect(window._cpmMainUpdateCompletedThisBoot).toBe(true);
+
+        delete window._cpmMainUpdateCompletedThisBoot;
     });
 });

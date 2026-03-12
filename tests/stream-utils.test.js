@@ -174,6 +174,35 @@ describe('checkStreamCapability', () => {
         expect(logSpy).toHaveBeenCalledWith('[CupcakePM] ReadableStream transfer NOT supported by bridge. Falling back to string responses.');
     });
 
+    it('returns false when structured-clone emits messageerror and caches the result', async () => {
+        let channelCount = 0;
+        class FakeMessageChannel {
+            constructor() {
+                channelCount++;
+                this.port1 = {
+                    close() {},
+                    postMessage: () => {
+                        queueMicrotask(() => this.port2.onmessageerror?.(new Event('messageerror')));
+                    },
+                };
+                this.port2 = {
+                    onmessage: null,
+                    onmessageerror: null,
+                    close() {},
+                };
+            }
+        }
+        vi.stubGlobal('MessageChannel', FakeMessageChannel);
+        vi.stubGlobal('document', { querySelector: vi.fn(() => null) });
+        const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+        await expect(checkStreamCapability()).resolves.toBe(false);
+        await expect(checkStreamCapability()).resolves.toBe(false);
+
+        expect(channelCount).toBe(1);
+        expect(logSpy).toHaveBeenCalledWith('[CupcakePM] ReadableStream transfer NOT supported by bridge. Falling back to string responses.');
+    });
+
     it('resetStreamCapability clears cached result for a new probe', async () => {
         let mode = 'success';
         class FakeMessageChannel {
@@ -201,5 +230,67 @@ describe('checkStreamCapability', () => {
         mode = 'fail';
 
         await expect(checkStreamCapability()).resolves.toBe(false);
+    });
+
+    it('returns false via Phase 1 timeout when postMessage never triggers callbacks', async () => {
+        vi.useFakeTimers();
+        class FakeMessageChannel {
+            constructor() {
+                this.port1 = {
+                    close() {},
+                    // postMessage succeeds but never fires onmessage/onmessageerror
+                    postMessage: () => {},
+                };
+                this.port2 = {
+                    onmessage: null,
+                    onmessageerror: null,
+                    close() {},
+                };
+            }
+        }
+        vi.stubGlobal('MessageChannel', FakeMessageChannel);
+        vi.stubGlobal('document', { querySelector: vi.fn(() => null) });
+        vi.spyOn(console, 'log').mockImplementation(() => {});
+
+        const promise = checkStreamCapability();
+        // Advance past the 500ms timeout in Phase 1
+        await vi.advanceTimersByTimeAsync(600);
+        await expect(promise).resolves.toBe(false);
+        vi.useRealTimers();
+    });
+
+    it('returns false via Phase 2 timeout when guest-bridge postMessage never responds', async () => {
+        vi.useFakeTimers();
+        let phase = 0;
+        class FakeMessageChannel {
+            constructor() {
+                phase++;
+                this.port2 = {
+                    onmessage: null,
+                    onmessageerror: null,
+                    close() {},
+                };
+                this.port1 = {
+                    close() {},
+                    postMessage: (_payload, _transferables) => {
+                        if (phase === 1) throw new Error('clone failed');
+                        // Phase 2: postMessage succeeds but never triggers onmessage (timeout)
+                    },
+                };
+            }
+        }
+        vi.stubGlobal('MessageChannel', FakeMessageChannel);
+        vi.stubGlobal('document', {
+            querySelector: vi.fn(() => ({
+                textContent: 'function collectTransferables(obj, transferables = []) { if (obj instanceof ReadableStream) transferables.push(obj); return transferables; }',
+            })),
+        });
+        vi.spyOn(console, 'log').mockImplementation(() => {});
+
+        const promise = checkStreamCapability();
+        // Advance past Phase 1 timeout (500ms) + Phase 2 timeout (500ms)
+        await vi.advanceTimersByTimeAsync(1200);
+        await expect(promise).resolves.toBe(false);
+        vi.useRealTimers();
     });
 });

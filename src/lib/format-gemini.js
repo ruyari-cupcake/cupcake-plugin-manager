@@ -1,3 +1,4 @@
+// @ts-check
 /**
  * format-gemini.js — Format messages for Google Gemini API.
  * Includes safety settings, thinking config, parameter validation,
@@ -35,6 +36,7 @@ export function getGeminiSafetySettings(modelId) {
 /**
  * Validate and clamp Gemini API parameters to valid ranges.
  * Mutates the generationConfig object in place.
+ * @param {Record<string, any>} generationConfig
  */
 export function validateGeminiParams(generationConfig) {
     if (!generationConfig || typeof generationConfig !== 'object') return;
@@ -59,6 +61,7 @@ export function validateGeminiParams(generationConfig) {
 
 /**
  * Check if a model is an experimental Gemini model.
+ * @param {string} modelId
  */
 export function isExperimentalGeminiModel(modelId) {
     return modelId && (modelId.includes('exp') || modelId.includes('experimental'));
@@ -66,6 +69,7 @@ export function isExperimentalGeminiModel(modelId) {
 
 /**
  * Check if a Gemini model supports penalty parameters.
+ * @param {string} modelId
  */
 export function geminiSupportsPenalty(modelId) {
     if (!modelId) return false;
@@ -80,6 +84,8 @@ export function geminiSupportsPenalty(modelId) {
 /**
  * Strip frequencyPenalty/presencePenalty from generationConfig if model doesn't
  * support them, or if values are 0.
+ * @param {Record<string, any>} generationConfig
+ * @param {string} modelId
  */
 export function cleanExperimentalModelParams(generationConfig, modelId) {
     const supported = geminiSupportsPenalty(modelId);
@@ -124,7 +130,7 @@ export function buildGeminiThinkingConfig(model, level, budget, isVertexAI) {
         return { includeThoughts: true, thinkingBudget: budgetNum };
     }
     if (level && level !== 'off' && level !== 'none') {
-        const budgets = { 'MINIMAL': 1024, 'LOW': 4096, 'MEDIUM': 10240, 'HIGH': 24576 };
+        const budgets = /** @type {Record<string, number>} */ ({ 'MINIMAL': 1024, 'LOW': 4096, 'MEDIUM': 10240, 'HIGH': 24576 });
         const mapped = budgets[level] || parseInt(level) || 10240;
         return { includeThoughts: true, thinkingBudget: mapped };
     }
@@ -140,10 +146,15 @@ export function buildGeminiThinkingConfig(model, level, budget, isVertexAI) {
 export const ThoughtSignatureCache = {
     _cache: new Map(),
     _maxSize: 50,
+    /** @param {any} responseText */
     _keyOf(responseText) {
         const normalized = stripThoughtDisplayContent(stripInternalTags(String(responseText || '')) || '');
         return normalized.substring(0, 500);
     },
+    /**
+     * @param {any} responseText
+     * @param {any} signature
+     */
     save(responseText, signature) {
         if (!responseText || !signature) return;
         const key = this._keyOf(responseText);
@@ -153,6 +164,7 @@ export const ThoughtSignatureCache = {
             this._cache.delete(firstKey);
         }
     },
+    /** @param {any} responseText */
     get(responseText) {
         if (!responseText) return null;
         const key = this._keyOf(responseText);
@@ -165,8 +177,8 @@ export const ThoughtSignatureCache = {
 
 /**
  * Convert a normalized multimodal object to a Gemini content part.
- * @param {Object} modal - Normalized modal { type, base64?, url?, mimeType? }
- * @returns {Object} Gemini part (inlineData or fileData)
+ * @param {Record<string, any>} modal - Normalized modal { type, base64?, url?, mimeType? }
+ * @returns {any} Gemini part (inlineData or fileData)
  */
 function _modalToGeminiPart(modal) {
     if (modal.url && modal.type === 'image') {
@@ -178,14 +190,14 @@ function _modalToGeminiPart(modal) {
 
 /**
  * Format messages for Gemini generateContent / streamGenerateContent API.
- * @param {Array} messagesRaw - Raw message array
+ * @param {Array<any>} messagesRaw - Raw message array
  * @param {Object} config - Formatting options
  * @param {boolean} [config.preserveSystem] - Keep system instructions in dedicated field
  * @param {boolean} [config.useThoughtSignature] - Inject cached thought signatures
- * @returns {{ contents: Array, systemInstruction: string[] }}
+ * @returns {{ contents: Array<any>, systemInstruction: string[] }}
  */
 export function formatToGemini(messagesRaw, config = {}) {
-    const messages = sanitizeMessages(messagesRaw);
+    const messages = /** @type {any[]} */ (sanitizeMessages(messagesRaw));
     const systemInstruction = [];
     const contents = [];
 
@@ -228,7 +240,7 @@ export function formatToGemini(messagesRaw, config = {}) {
 
         // Multimodal handling
         if (normalizedMultimodals.length > 0) {
-            const lastMessage = contents.length > 0 ? contents[contents.length - 1] : null;
+            const lastMessage = /** @type {any} */ (contents.length > 0 ? contents[contents.length - 1] : null);
 
             if (lastMessage && lastMessage.role === role) {
                 if (trimmed) {
@@ -258,6 +270,7 @@ export function formatToGemini(messagesRaw, config = {}) {
         }
 
         // Text-only message
+        /** @type {Record<string, any>} */
         const part = { text: trimmed || text };
         if (config.useThoughtSignature && role === 'model') {
             const cachedSig = ThoughtSignatureCache.get(trimmed || text);

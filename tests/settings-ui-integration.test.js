@@ -84,6 +84,14 @@ vi.mock('../src/lib/settings-ui-panels.js', () => ({
 }));
 
 import { openCpmSettings } from '../src/lib/settings-ui.js';
+import { initCustomModelsManager } from '../src/lib/settings-ui-custom-models.js';
+import { buildPluginsTabRenderer } from '../src/lib/settings-ui-plugins.js';
+import { initApiViewPanel, initExportImport } from '../src/lib/settings-ui-panels.js';
+
+async function flushUi() {
+    await Promise.resolve();
+    await new Promise(resolve => setTimeout(resolve, 0));
+}
 
 describe('openCpmSettings — full DOM integration', () => {
     beforeEach(() => {
@@ -93,8 +101,8 @@ describe('openCpmSettings — full DOM integration', () => {
         document.body.innerHTML = '';
         document.head.innerHTML = '';
 
-        // Pre-create Tailwind script element to skip loading await
-        const tw = document.createElement('script');
+        // Pre-create Tailwind style element to skip loading
+        const tw = document.createElement('style');
         tw.id = 'cpm-tailwind';
         document.head.appendChild(tw);
     });
@@ -109,24 +117,26 @@ describe('openCpmSettings — full DOM integration', () => {
         expect(mockRisu.showContainer).toHaveBeenCalledWith('fullscreen');
     });
 
-    it('continues rendering when Tailwind CDN load fails', async () => {
+    it('injects Tailwind CSS as inline <style> when not already present', async () => {
+        // Remove pre-created style so ensureTailwindLoaded actually injects
         document.head.innerHTML = '';
-
-        const originalAppendChild = document.head.appendChild.bind(document.head);
-        vi.spyOn(document.head, 'appendChild').mockImplementation((el) => {
-            const appended = originalAppendChild(el);
-            if (el instanceof HTMLScriptElement && el.id === 'cpm-tailwind' && typeof el.onerror === 'function') {
-                queueMicrotask(() => el.onerror?.(new Event('error')));
-            }
-            return appended;
-        });
-
-        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
         await openCpmSettings();
 
-        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Tailwind CDN load failed'));
+        const style = document.getElementById('cpm-tailwind');
+        expect(style).toBeTruthy();
+        expect(style.tagName).toBe('STYLE');
+        expect(style.textContent.length).toBeGreaterThan(0);
         expect(document.getElementById('cpm-close-btn')).toBeTruthy();
+    });
+
+    it('reuses the existing Tailwind style without injecting duplicates across re-open', async () => {
+        document.head.innerHTML = '';
+
+        await openCpmSettings();
+        await openCpmSettings();
+
+        expect(document.head.querySelectorAll('#cpm-tailwind')).toHaveLength(1);
     });
 
     it('renders the sidebar with version info', async () => {
@@ -252,6 +262,107 @@ describe('openCpmSettings — full DOM integration', () => {
         mockState.ALL_DEFINED_MODELS = [];
     });
 
+    it('invokes extracted sub-module initializers after rendering', async () => {
+        await openCpmSettings();
+
+        expect(buildPluginsTabRenderer).toHaveBeenCalledTimes(1);
+        expect(initCustomModelsManager).toHaveBeenCalledTimes(1);
+        expect(initApiViewPanel).toHaveBeenCalledTimes(1);
+        expect(initExportImport).toHaveBeenCalledTimes(1);
+    });
+
+    it('renders dynamic provider fallback content when a provider tab throws', async () => {
+        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        mockRegisteredProviderTabs.push({
+            id: 'tab-broken-provider',
+            icon: '💥',
+            label: 'Broken Provider',
+            renderContent: vi.fn(async () => { throw new Error('provider tab crash'); }),
+        });
+
+        await openCpmSettings();
+
+        const providerTab = document.getElementById('tab-broken-provider');
+        expect(providerTab).toBeTruthy();
+        expect(providerTab.innerHTML).toContain('Error rendering tab: provider tab crash');
+        expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('Failed to render settings tab: tab-broken-provider'), expect.any(Error));
+
+        mockRegisteredProviderTabs.length = 0;
+        errorSpy.mockRestore();
+    });
+
+    it('updates stream status when bridge support is unavailable', async () => {
+        mockCheckStreamCapability.mockResolvedValueOnce(false);
+
+        await openCpmSettings();
+        await flushUi();
+
+        const statusEl = document.getElementById('cpm-stream-status');
+        expect(statusEl.innerHTML).toContain('Bridge 미지원');
+        expect(statusEl.classList.contains('border-yellow-800')).toBe(true);
+    });
+
+    it('shows stream status error message when capability check throws', async () => {
+        mockCheckStreamCapability.mockRejectedValueOnce(new Error('bridge probe failed'));
+
+        await openCpmSettings();
+        await flushUi();
+
+        const statusEl = document.getElementById('cpm-stream-status');
+        expect(statusEl.innerHTML).toContain('Bridge 확인 실패:');
+        expect(statusEl.innerHTML).toContain('bridge probe failed');
+    });
+
+    it('toggles the mobile menu and closes it after tab selection on small screens', async () => {
+        Object.defineProperty(window, 'innerWidth', {
+            configurable: true,
+            value: 375,
+        });
+
+        await openCpmSettings();
+
+        const menuBtn = document.getElementById('cpm-mobile-menu-btn');
+        const dropdown = document.getElementById('cpm-mobile-dropdown');
+        const pluginsBtn = Array.from(document.querySelectorAll('.tab-btn')).find(btn => btn.dataset.target === 'tab-plugins');
+
+        menuBtn.click();
+        expect(dropdown.classList.contains('hidden')).toBe(false);
+        expect(dropdown.classList.contains('flex')).toBe(true);
+
+        pluginsBtn.click();
+        expect(dropdown.classList.contains('hidden')).toBe(true);
+        expect(dropdown.classList.contains('flex')).toBe(false);
+    });
+
+    it('toggles password inputs rendered by dynamic provider tabs', async () => {
+        mockRegisteredProviderTabs.push({
+            id: 'tab-secret-provider',
+            icon: '🔐',
+            label: 'Secret Provider',
+            renderContent: vi.fn(async (renderInput) => `
+                <div class="secret-wrap">
+                    ${await renderInput('cpm_secret_api_key', 'Secret API Key', 'password')}
+                </div>
+            `),
+        });
+
+        await openCpmSettings();
+
+        const providerBtn = Array.from(document.querySelectorAll('.tab-btn')).find(btn => btn.dataset.target === 'tab-secret-provider');
+        providerBtn.click();
+
+        const input = document.getElementById('cpm_secret_api_key');
+        const toggleBtn = document.querySelector('[data-target-id="cpm_secret_api_key"]');
+
+        expect(input.type).toBe('password');
+        toggleBtn.click();
+        expect(input.type).toBe('text');
+        toggleBtn.click();
+        expect(input.type).toBe('password');
+
+        mockRegisteredProviderTabs.length = 0;
+    });
+
     it('renders dynamic provider tabs', async () => {
         mockRegisteredProviderTabs.push({
             id: 'tab-test-provider',
@@ -267,5 +378,14 @@ describe('openCpmSettings — full DOM integration', () => {
         expect(providerTab.innerHTML).toContain('Test provider content');
 
         mockRegisteredProviderTabs.length = 0;
+    });
+
+    it('keeps the mobile menu stable when support elements are missing', async () => {
+        await openCpmSettings();
+
+        document.getElementById('cpm-mobile-dropdown')?.remove();
+        document.getElementById('cpm-mobile-icon')?.remove();
+
+        expect(() => document.getElementById('cpm-mobile-menu-btn')?.click()).not.toThrow();
     });
 });

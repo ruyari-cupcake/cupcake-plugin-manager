@@ -1,3 +1,4 @@
+// @ts-check
 /**
  * settings-backup.js — Persistent settings backup/restore via pluginStorage.
  * Survives plugin deletion — settings can be auto-restored on reinstall.
@@ -50,6 +51,10 @@ export const BASE_SETTING_KEYS = [
     'cpm_compatibility_mode',
 ];
 
+/**
+ * @param {any} key
+ * @returns {boolean}
+ */
 export function isManagedSettingKey(key) {
     return typeof key === 'string' && key.length > 0 && (
         key.startsWith('cpm_')
@@ -60,14 +65,14 @@ export function isManagedSettingKey(key) {
 
 export function getManagedSettingKeys(providerTabs = registeredProviderTabs) {
     const dynamicKeys = Array.isArray(providerTabs)
-        ? providerTabs.flatMap(tab => tab?.exportKeys || []).filter(isManagedSettingKey)
+        ? providerTabs.flatMap(tab => (/** @type {Record<string, any>} */ (tab))?.exportKeys || []).filter(isManagedSettingKey)
         : [];
     return [...new Set([...getAuxSettingKeys(), ...BASE_SETTING_KEYS, ...dynamicKeys])];
 }
 
 export const SettingsBackup = {
     STORAGE_KEY: 'cpm_settings_backup',
-    _cache: null,
+    _cache: /** @type {Record<string, any> | null} */ (null),
 
     getAllKeys() {
         return getManagedSettingKeys();
@@ -99,32 +104,34 @@ export const SettingsBackup = {
         }
     },
 
-    async updateKey(key, value) {
+    async updateKey(/** @type {string} */ key, /** @type {any} */ value) {
         if (!this._cache) await this.load();
-        this._cache[key] = value;
+        if (this._cache) this._cache[key] = value;
         await this.save();
     },
 
     async snapshotAll() {
         if (!this._cache) this._cache = {};
+        const cache = this._cache;
         for (const key of this.getAllKeys()) {
             const val = await safeGetArg(key);
             if (val !== undefined && val !== '') {
-                this._cache[key] = val;
+                cache[key] = val;
             }
         }
         await this.save();
-        console.log(`[CPM Backup] Snapshot saved (${Object.keys(this._cache).length} keys)`);
+        console.log(`[CPM Backup] Snapshot saved (${Object.keys(cache).length} keys)`);
     },
 
     async restoreIfEmpty() {
         if (!this._cache) await this.load();
-        if (!this._cache || Object.keys(this._cache).length === 0) {
+        const cache = this._cache;
+        if (!cache || Object.keys(cache).length === 0) {
             console.log('[CPM Backup] No backup found, skipping restore.');
             return 0;
         }
         let restoredCount = 0;
-        for (const [key, value] of Object.entries(this._cache)) {
+        for (const [key, value] of Object.entries(cache)) {
             const current = await safeGetArg(key);
             if ((current === undefined || current === null || current === '') && value !== undefined && value !== '') {
                 Risu.setArgument(key, String(value));

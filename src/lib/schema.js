@@ -138,7 +138,7 @@ export function parseAndValidate(jsonString, schema) {
     try {
         parsed = JSON.parse(jsonString);
     } catch (e) {
-        return { ok: false, error: `JSON parse failed: ${e.message}`, fallback: schema.fallback };
+        return { ok: false, error: `JSON parse failed: ${/** @type {Error} */ (e).message}`, fallback: schema.fallback };
     }
     return validateSchema(parsed, schema);
 }

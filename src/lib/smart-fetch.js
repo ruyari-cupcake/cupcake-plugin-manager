@@ -1,3 +1,4 @@
+// @ts-check
 /**
  * smart-fetch.js — 3-strategy fetch wrapper for V3 iframe sandbox.
  *
@@ -72,8 +73,10 @@ function _isAbortError(e) {
 }
 
 /** Cached compatibility mode flag — null = not yet read, boolean = cached value */
+/** @type {boolean | null} */
 let _compatibilityModeCache = null;
 /** Cached bridge capability — null = not yet checked */
+/** @type {boolean | null} */
 let _bridgeCapableCache = null;
 
 /**
@@ -103,6 +106,11 @@ async function _isCompatibilityMode() {
     return !_bridgeCapableCache;
 }
 
+/**
+ * @param {string} url
+ * @param {RequestInit & Record<string, any>} [options]
+ * @returns {Promise<Response>}
+ */
 export async function smartNativeFetch(url, options = {}) {
     // Early abort check — avoid unnecessary work if already cancelled
     if (options.signal && options.signal.aborted) {
@@ -114,7 +122,7 @@ export async function smartNativeFetch(url, options = {}) {
         try {
             options = { ...options, body: sanitizeBodyJSON(options.body) };
         } catch (e) {
-            console.error('[CupcakePM] smartNativeFetch: body re-sanitization failed:', e.message);
+            console.error('[CupcakePM] smartNativeFetch: body re-sanitization failed:', /** @type {Error} */ (e).message);
         }
     }
 
@@ -134,14 +142,14 @@ export async function smartNativeFetch(url, options = {}) {
     // cannot serialize AbortSignal via postMessage. When this DataCloneError
     // occurs, we strip the signal but race the request against the original
     // signal so callers still see AbortError on cancellation.
-    const callNativeFetchWithAbortFallback = async (_url, _options) => {
+    const callNativeFetchWithAbortFallback = async (/** @type {string} */ _url, /** @type {any} */ _options) => {
         if (_options?.signal?.aborted) {
             throw new DOMException('The operation was aborted.', 'AbortError');
         }
         try {
             return await Risu.nativeFetch(_url, _options);
         } catch (_err) {
-            const _msg = String(_err?.message || _err || '');
+            const _msg = String(/** @type {any} */ (_err)?.message || _err || '');
             const _hasSignal = !!(_options && _options.signal);
             const _cloneIssue = /clone|structured|postmessage|AbortSignal|DataCloneError/i.test(_msg);
             if (_hasSignal && _cloneIssue) {
@@ -163,7 +171,7 @@ export async function smartNativeFetch(url, options = {}) {
             return res;
         } catch (e) {
             if (_isAbortError(e)) throw e;
-            console.log(`[CupcakePM] Direct fetch failed for ${url.substring(0, 60)}...: ${e.message}`);
+            console.log(`[CupcakePM] Direct fetch failed for ${url.substring(0, 60)}...: ${/** @type {Error} */ (e).message}`);
         }
     }
 
@@ -184,7 +192,7 @@ export async function smartNativeFetch(url, options = {}) {
             console.log(`[CupcakePM] Google/Vertex nativeFetch returned unusable response, trying fallbacks: status=${nfRes?.status || 'unknown'}`);
         } catch (e) {
             if (_isAbortError(e)) throw e;
-            console.log(`[CupcakePM] Google/Vertex nativeFetch error: ${e.message}`);
+            console.log(`[CupcakePM] Google/Vertex nativeFetch error: ${/** @type {Error} */ (e).message}`);
         }
     }
 
@@ -216,7 +224,7 @@ export async function smartNativeFetch(url, options = {}) {
             }
         } catch (e) {
             if (_isAbortError(e)) throw e;
-            console.log(`[CupcakePM] Copilot nativeFetch error: ${e.message}`);
+            console.log(`[CupcakePM] Copilot nativeFetch error: ${/** @type {Error} */ (e).message}`);
         }
     }
 
@@ -254,7 +262,7 @@ export async function smartNativeFetch(url, options = {}) {
                 try {
                     bodyObj = JSON.parse(JSON.stringify(bodyObj));
                 } catch (serErr) {
-                    console.warn('[CupcakePM] bodyObj JSON round-trip failed, stripping non-serializable keys:', serErr.message);
+                    console.warn('[CupcakePM] bodyObj JSON round-trip failed, stripping non-serializable keys:', /** @type {Error} */ (serErr).message);
                     try { bodyObj = _stripNonSerializable(bodyObj, 0); } catch (_) { }
                 }
             }
@@ -270,7 +278,7 @@ export async function smartNativeFetch(url, options = {}) {
                     abortSignal: options.signal,
                 });
             } catch (_rfErr) {
-                const _rfMsg = String(_rfErr?.message || _rfErr || '');
+                const _rfMsg = String(/** @type {any} */ (_rfErr)?.message || _rfErr || '');
                 if (options.signal && /clone|structured|postmessage|AbortSignal|DataCloneError/i.test(_rfMsg)) {
                     console.warn('[CupcakePM] risuFetch signal clone failed; retrying without signal (abort monitored locally):', _rfMsg);
                     result = await _raceWithAbortSignal(
@@ -291,7 +299,7 @@ export async function smartNativeFetch(url, options = {}) {
             const responseBody = _extractResponseBody(result);
             if (responseBody) {
                 console.log(`[CupcakePM] risuFetch succeeded: status=${result.status} for ${url.substring(0, 60)}`);
-                return new Response(responseBody, {
+                return new Response(/** @type {any} */ (responseBody), {
                     status: result.status || 200,
                     headers: new Headers(result.headers || {}),
                 });
@@ -300,7 +308,7 @@ export async function smartNativeFetch(url, options = {}) {
             console.log(`[CupcakePM] risuFetch not a real response: ${errPreview}`);
         } catch (e) {
             if (_isAbortError(e)) throw e;
-            console.log(`[CupcakePM] risuFetch error: ${e.message}`);
+            console.log(`[CupcakePM] risuFetch error: ${/** @type {Error} */ (e).message}`);
         }
     }
 
@@ -318,7 +326,7 @@ export async function smartNativeFetch(url, options = {}) {
             return res;
         } catch (e) {
             if (_isAbortError(e)) throw e;
-            console.error(`[CupcakePM] nativeFetch also failed: ${e.message}`);
+            console.error(`[CupcakePM] nativeFetch also failed: ${/** @type {Error} */ (e).message}`);
         }
     }
 
@@ -327,6 +335,10 @@ export async function smartNativeFetch(url, options = {}) {
 
 // ─── Internal helpers ───
 
+/**
+ * @param {any} body
+ * @returns {any}
+ */
 function _parseBodyForRisuFetch(body) {
     if (!body) return undefined;
     if (typeof body === 'string') {
@@ -338,6 +350,10 @@ function _parseBodyForRisuFetch(body) {
     return body;
 }
 
+/**
+ * @param {any} bodyObj
+ * @returns {any}
+ */
 function _deepSanitizeBody(bodyObj) {
     if (Array.isArray(bodyObj.messages)) {
         try {
@@ -348,22 +364,28 @@ function _deepSanitizeBody(bodyObj) {
                 if (_rm == null || typeof _rm !== 'object') continue;
                 if (typeof _rm.role !== 'string' || !_rm.role) continue;
                 if (_rm.content === null || _rm.content === undefined) continue;
+                /** @type {Record<string, any>} */
                 const safeMsg = { role: _rm.role, content: _rm.content };
                 if (_rm.name && typeof _rm.name === 'string') safeMsg.name = _rm.name;
                 bodyObj.messages.push(safeMsg);
             }
         } catch (_e) {
-            console.error('[CupcakePM] Deep reconstruct of messages failed:', _e.message);
-            bodyObj.messages = bodyObj.messages.filter(m => m != null && typeof m === 'object');
+            console.error('[CupcakePM] Deep reconstruct of messages failed:', /** @type {Error} */ (_e).message);
+            bodyObj.messages = bodyObj.messages.filter((/** @type {any} */ m) => m != null && typeof m === 'object');
         }
     }
     if (Array.isArray(bodyObj.contents)) {
         try { bodyObj.contents = JSON.parse(JSON.stringify(bodyObj.contents)); } catch (_) { }
-        bodyObj.contents = bodyObj.contents.filter(m => m != null && typeof m === 'object');
+        bodyObj.contents = bodyObj.contents.filter((/** @type {any} */ m) => m != null && typeof m === 'object');
     }
     return bodyObj;
 }
 
+/**
+ * @param {any} obj
+ * @param {number} depth
+ * @returns {any}
+ */
 function _stripNonSerializable(obj, depth) {
     if (depth > 15) return undefined;
     if (obj === null || obj === undefined) return obj;
@@ -372,6 +394,7 @@ function _stripNonSerializable(obj, depth) {
     if (t === 'function' || t === 'symbol' || t === 'bigint') return undefined;
     if (Array.isArray(obj)) return obj.map(v => _stripNonSerializable(v, depth + 1)).filter(v => v !== undefined);
     if (t === 'object') {
+        /** @type {Record<string, any>} */
         const out = {};
         for (const k of Object.keys(obj)) {
             try { const v = _stripNonSerializable(obj[k], depth + 1); if (v !== undefined) out[k] = v; } catch (_) { }
@@ -381,6 +404,10 @@ function _stripNonSerializable(obj, depth) {
     return undefined;
 }
 
+/**
+ * @param {any} result
+ * @returns {Uint8Array | null}
+ */
 function _extractResponseBody(result) {
     if (!result || result.data == null) return null;
     if (result.data instanceof Uint8Array) return result.data;
@@ -408,6 +435,12 @@ function _extractResponseBody(result) {
     return null;
 }
 
+/**
+ * @param {string} url
+ * @param {RequestInit & Record<string, any>} options
+ * @param {string} mode
+ * @returns {Promise<Response | null>}
+ */
 async function _tryCopilotRisuFetch(url, options, mode) {
     try {
         const bodyObj = _parseBodyForRisuFetch(options.body);
@@ -415,6 +448,7 @@ async function _tryCopilotRisuFetch(url, options, mode) {
             throw new Error('Body JSON parse failed — cannot safely pass to risuFetch');
         }
 
+        /** @type {Record<string, any>} */
         const fetchOpts = {
             method: options.method || 'POST',
             headers: options.headers || {},
@@ -429,7 +463,7 @@ async function _tryCopilotRisuFetch(url, options, mode) {
         try {
             result = await Risu.risuFetch(url, fetchOpts);
         } catch (_rfErr) {
-            const _rfMsg = String(_rfErr?.message || _rfErr || '');
+            const _rfMsg = String(/** @type {any} */ (_rfErr)?.message || _rfErr || '');
             if (options.signal && /clone|structured|postmessage|AbortSignal|DataCloneError/i.test(_rfMsg)) {
                 console.warn(`[CupcakePM] Copilot risuFetch(${mode}) signal clone failed; retrying without signal (abort monitored locally)`);
                 const _signal = options.signal;
@@ -447,7 +481,7 @@ async function _tryCopilotRisuFetch(url, options, mode) {
                 return null;
             }
             console.log(`[CupcakePM] Copilot ${mode} risuFetch succeeded: status=${result.status} for ${url.substring(0, 60)}`);
-            return new Response(responseBody, {
+            return new Response(/** @type {any} */ (responseBody), {
                 status: result.status || 200,
                 headers: new Headers(result.headers || {}),
             });
@@ -457,7 +491,7 @@ async function _tryCopilotRisuFetch(url, options, mode) {
         console.log(`[CupcakePM] Copilot ${mode} risuFetch not a real response: ${errPreview}`);
     } catch (e) {
         if (_isAbortError(e)) throw e;
-        console.log(`[CupcakePM] Copilot ${mode} risuFetch error: ${e.message}`);
+        console.log(`[CupcakePM] Copilot ${mode} risuFetch error: ${/** @type {Error} */ (e).message}`);
     }
     return null;
 }

@@ -1,3 +1,4 @@
+// @ts-check
 /**
  * sse-parsers.js — SSE line parsers for different API formats.
  * Pure functions that extract delta text from SSE "data: {...}" lines.
@@ -57,7 +58,7 @@ export const GEMINI_BLOCK_REASONS = ['SAFETY', 'RECITATION', 'OTHER', 'BLOCKLIST
  * Gemini SSE line parser: extracts text parts from streamed JSON chunks.
  * Handles thinking blocks, thought signatures, safety blocks, and usageMetadata.
  * @param {string} line - SSE data line
- * @param {Object} config - Mutable config for tracking state across chunks
+ * @param {Record<string, any>} config - Mutable config for tracking state across chunks
  * @returns {string|null} Delta text content or null
  */
 export function parseGeminiSSELine(line, config = {}) {

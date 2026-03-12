@@ -360,4 +360,205 @@ describe('formatToOpenAI — deep branch coverage', () => {
         // Even with empty mime split, the format defaults to 'mp3'
         expect(audioPart.input_audio.format).toBe('mp3');
     });
+
+    it('converts OpenAI-style input_image parts back into image_url content', () => {
+        const messages = [{
+            role: 'user',
+            content: [{ type: 'input_image', image_url: { url: 'https://img.example.com/converted.png' } }],
+        }];
+        const result = formatToOpenAI(messages);
+        expect(result).toHaveLength(1);
+        expect(result[0].content[0]).toEqual({
+            type: 'image_url',
+            image_url: { url: 'https://img.example.com/converted.png' },
+        });
+    });
+
+    it('converts OpenAI-style input_audio parts into normalized input_audio content', () => {
+        const messages = [{
+            role: 'user',
+            content: [{ type: 'input_audio', input_audio: { data: 'abc123', format: 'wav' } }],
+        }];
+        const result = formatToOpenAI(messages);
+        const audioPart = result[0].content.find(p => p.type === 'input_audio');
+        expect(audioPart.input_audio.data).toBe('abc123');
+        expect(audioPart.input_audio.format).toBe('wav');
+    });
+
+    it('drops array-content messages when every part is invalid or empty', () => {
+        const messages = [
+            { role: 'user', content: [null, undefined, false] },
+        ];
+        const result = formatToOpenAI(messages);
+        expect(result).toEqual([]);
+    });
+
+    it('stringifies non-string system and first-message content during mergesys', () => {
+        const result = formatToOpenAI([
+            { role: 'system', content: { rule: 'strict' } },
+            { role: 'user', content: { prompt: 'hello' } },
+        ], { mergesys: true });
+
+        expect(result).toHaveLength(1);
+        expect(result[0].content).toContain('{"rule":"strict"}');
+        expect(result[0].content).toContain('{"prompt":"hello"}');
+    });
+
+    it('filters messages whose roles are removed during sanitization', () => {
+        const result = formatToOpenAI([
+            { content: 'implicit user' },
+            { role: 123, content: 'numeric role' },
+        ]);
+
+        expect(result).toEqual([]);
+    });
+
+    it('converts system to developer after sysfirst reordering', () => {
+        const result = formatToOpenAI([
+            { role: 'user', content: 'hello' },
+            { role: 'system', content: 'policy' },
+        ], { sysfirst: true, developerRole: true });
+
+        expect(result[0]).toEqual({ role: 'developer', content: 'policy' });
+        expect(result[1]).toEqual({ role: 'user', content: 'hello' });
+    });
+
+    it('passes through array parts that are already normalized OpenAI text parts', () => {
+        const result = formatToOpenAI([{
+            role: 'user',
+            content: [{ type: 'text', text: 'already-normalized' }],
+        }]);
+
+        expect(result).toHaveLength(1);
+        expect(result[0].content).toEqual([{ type: 'text', text: 'already-normalized' }]);
+    });
+
+    // ── Additional branch gap coverage ──
+
+    it('altrole merging preserves name on first message, drops on merged', () => {
+        const messages = [
+            { role: 'user', content: 'Hello', name: 'Alice' },
+            { role: 'user', content: 'Follow-up', name: 'Bob' },
+        ];
+        const result = formatToOpenAI(messages, { altrole: true });
+        expect(result).toHaveLength(1);
+        // First message's name is preserved
+        expect(result[0].name).toBe('Alice');
+        // Content is merged
+        expect(result[0].content).toContain('Hello');
+        expect(result[0].content).toContain('Follow-up');
+    });
+
+    it('mustuser is no-op when first message is already user', () => {
+        const messages = [
+            { role: 'user', content: 'Already user' },
+            { role: 'assistant', content: 'Reply' },
+        ];
+        const result = formatToOpenAI(messages, { mustuser: true });
+        expect(result).toHaveLength(2);
+        expect(result[0].role).toBe('user');
+        expect(result[0].content).toBe('Already user');
+    });
+
+    it('mustuser is no-op when first message is system', () => {
+        const messages = [
+            { role: 'system', content: 'System prompt' },
+            { role: 'user', content: 'Question' },
+        ];
+        const result = formatToOpenAI(messages, { mustuser: true });
+        expect(result).toHaveLength(2);
+        expect(result[0].role).toBe('system');
+    });
+
+    it('mergesys with non-leading system messages interspersed', () => {
+        const messages = [
+            { role: 'system', content: 'System prompt' },
+            { role: 'user', content: 'Question 1' },
+            { role: 'system', content: 'Mid system' },
+            { role: 'assistant', content: 'Answer' },
+        ];
+        const result = formatToOpenAI(messages, { mergesys: true });
+        // All system messages are merged, only non-system messages remain
+        // The merged system prompt is prepended to first non-system message
+        expect(result[0].role).toBe('user');
+        expect(result[0].content).toContain('System prompt');
+        expect(result[0].content).toContain('Mid system');
+        expect(result[0].content).toContain('Question 1');
+        // No system messages in output
+        expect(result.every(m => m.role !== 'system')).toBe(true);
+    });
+
+    it('handles content that is boolean false', () => {
+        const messages = [{ role: 'user', content: false }];
+        const result = formatToOpenAI(messages);
+        // false is not a string, not an array → goes to else branch
+        // String(false) = 'false' which is non-empty
+        expect(result).toHaveLength(1);
+        expect(result[0].content).toBe('false');
+    });
+
+    it('handles content that is number 0', () => {
+        const messages = [{ role: 'user', content: 0 }];
+        const result = formatToOpenAI(messages);
+        // payload.text for numeric = '0', which is non-empty after trim
+        expect(result).toHaveLength(1);
+        expect(result[0].content).toBe('0');
+    });
+
+    it('handles content that is empty array', () => {
+        const messages = [{ role: 'user', content: [] }];
+        const result = formatToOpenAI(messages);
+        // Empty array → mappedParts is empty → msg.content is empty array
+        // hasNonEmptyMessageContent([]) returns false → skipped
+        expect(result).toHaveLength(0);
+    });
+
+    it('altrole merging with array + array content', () => {
+        const messages = [
+            { role: 'assistant', content: [{ type: 'text', text: 'Part A' }] },
+            { role: 'assistant', content: [{ type: 'text', text: 'Part B' }] },
+        ];
+        const result = formatToOpenAI(messages, { altrole: true });
+        expect(result).toHaveLength(1);
+        expect(result[0].role).toBe('model');
+        expect(result[0].content).toHaveLength(2);
+        expect(result[0].content[0].text).toBe('Part A');
+        expect(result[0].content[1].text).toBe('Part B');
+    });
+
+    it('sysfirst moves non-first system message to top', () => {
+        const messages = [
+            { role: 'user', content: 'Hello' },
+            { role: 'assistant', content: 'Hi' },
+            { role: 'system', content: 'Policy' },
+        ];
+        const result = formatToOpenAI(messages, { sysfirst: true });
+        expect(result[0].role).toBe('system');
+        expect(result[0].content).toBe('Policy');
+        expect(result[1].role).toBe('user');
+    });
+
+    it('developerRole + sysfirst applies developer role after reordering', () => {
+        const messages = [
+            { role: 'user', content: 'hello' },
+            { role: 'system', content: 'policy' },
+            { role: 'assistant', content: 'reply' },
+        ];
+        const result = formatToOpenAI(messages, { sysfirst: true, developerRole: true });
+        expect(result[0].role).toBe('developer');
+        expect(result[0].content).toBe('policy');
+    });
+
+    it('altrole merging with empty content parts on both sides', () => {
+        const messages = [
+            { role: 'user', content: ' ' },
+            { role: 'user', content: 'Real text' },
+        ];
+        const result = formatToOpenAI(messages, { altrole: true });
+        // ' ' has hasNonEmptyMessageContent = false → may be filtered before merge
+        // Only 'Real text' should survive
+        expect(result.length).toBeGreaterThanOrEqual(1);
+        const textContents = result.map(m => m.content).flat();
+        expect(textContents.some(c => typeof c === 'string' ? c.includes('Real text') : false)).toBe(true);
+    });
 });

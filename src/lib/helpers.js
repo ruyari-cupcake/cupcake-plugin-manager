@@ -26,6 +26,7 @@ export function safeUUID() {
 /**
  * Safe JSON.stringify: replacer removes null/undefined from all arrays during serialization.
  * Catches nulls from toJSON(), undefined→null conversion, etc.
+ * @param {any} obj
  */
 export function safeStringify(obj) {
     return JSON.stringify(obj, function (_key, value) {
@@ -38,6 +39,7 @@ export function safeStringify(obj) {
 
 /**
  * Check if message content is non-empty (string, array, or object).
+ * @param {any} content
  */
 export function hasNonEmptyMessageContent(content) {
     if (content === null || content === undefined) return false;
@@ -49,6 +51,7 @@ export function hasNonEmptyMessageContent(content) {
 
 /**
  * Check if a message has attached multimodal content (images, audio, etc.).
+ * @param {any} message
  */
 export function hasAttachedMultimodals(message) {
     return !!(message && Array.isArray(message.multimodals) && message.multimodals.length > 0);
@@ -57,6 +60,7 @@ export function hasAttachedMultimodals(message) {
 /**
  * Escape HTML special characters to prevent XSS when interpolating into innerHTML.
  * Shared across all settings-ui modules.
+ * @param {any} s
  */
 export function escHtml(s) {
     return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -82,7 +86,7 @@ export function parseBase64DataUri(dataUri) {
 /**
  * Extract image URL from an OpenAI-format content part (image_url or input_image).
  * Handles both string and object forms of image_url.
- * @param {Object} part - Content part with image_url field
+ * @param {Record<string, any>} part - Content part with image_url field
  * @returns {string} URL or empty string
  */
 export function extractImageUrlFromPart(part) {

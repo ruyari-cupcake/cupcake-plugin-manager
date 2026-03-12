@@ -58,7 +58,7 @@ export function _toFiniteInt(v) {
 /**
  * Dispatch request to the correct provider fetcher.
  * @param {ModelDef} modelDef
- * @param {Object} args - Request arguments from RisuAI
+ * @param {Record<string, any>} args - Request arguments from RisuAI
  * @param {AbortSignal} [abortSignal]
  * @param {string} [_reqId] - Request ID for logging
  * @returns {Promise<RequestResult>}
@@ -96,7 +96,7 @@ export async function fetchByProviderId(modelDef, args, abortSignal, _reqId) {
         if (fetcher) return await fetcher(modelDef, messages, temp, maxTokens, args, abortSignal, _reqId);
 
         if (modelDef.provider.startsWith('Custom')) {
-            const cDef = state.CUSTOM_MODELS_CACHE.find(m => m.uniqueId === modelDef.uniqueId);
+            const cDef = /** @type {Record<string, any>|undefined} */ (state.CUSTOM_MODELS_CACHE.find((/** @type {any} */ m) => m.uniqueId === modelDef.uniqueId));
             if (!cDef) return { success: false, content: `[Cupcake PM] Custom model config not found.` };
 
             return await fetchCustom({
@@ -119,7 +119,8 @@ export async function fetchByProviderId(modelDef, args, abortSignal, _reqId) {
             }, messages, temp, maxTokens, args, abortSignal, _reqId);
         }
         return { success: false, content: `[Cupcake PM] Unknown provider selected: ${modelDef.provider}` };
-    } catch (e) {
+    } catch (_e) {
+        const e = /** @type {Error} */ (_e);
         return { success: false, content: `[Cupcake PM Crash] ${e.message}` };
     }
 }
@@ -129,7 +130,7 @@ export async function fetchByProviderId(modelDef, args, abortSignal, _reqId) {
 /**
  * Main request router — entry point called by RisuAI for every API request.
  * Handles slot inference, parameter overrides, logging, and streaming.
- * @param {Object} args - Request arguments from RisuAI
+ * @param {Record<string, any>} args - Request arguments from RisuAI
  * @param {ModelDef} activeModelDef - Currently selected model definition
  * @param {AbortSignal} [abortSignal]
  * @returns {Promise<RequestResult>}
@@ -188,7 +189,8 @@ export async function handleRequest(args, activeModelDef, abortSignal) {
     let result;
     try {
         result = await fetchByProviderId(targetDef, args, abortSignal, _reqId);
-    } catch (e) {
+    } catch (_e) {
+        const e = /** @type {Error} */ (_e);
         _updateApiRequest(_reqId, { duration: Date.now() - _startTime, status: 'crash', response: `[CRASH] ${e.message}` });
         console.error(`[CupcakePM] 💥 Request crashed (${_displayName}):`, e);
         try { Risu.log(`💥 CRASH (${_displayName}): ${e.message}`); } catch {}
@@ -210,8 +212,8 @@ export async function handleRequest(args, activeModelDef, abortSignal) {
     const _nonStreamTokenUsage = _takeTokenUsage(_reqId, false);
     const _showTokens = await safeGetBoolArg('cpm_show_token_usage', false);
 
-    const _apiRequestHistory = { get: (_id) => { /* placeholder — actual data comes from api-request-log module */ } };
-    const _logResponse = (contentStr, prefix = '📥 Response') => {
+    const _apiRequestHistory = { get: (/** @type {string} */ _id) => { /* placeholder — actual data comes from api-request-log module */ } };
+    const _logResponse = (/** @type {any} */ contentStr, prefix = '📥 Response') => {
         const safeContent = typeof contentStr === 'string' ? contentStr : (contentStr == null ? '' : String(contentStr));
         _updateApiRequest(_reqId, { response: safeContent.substring(0, 4000) });
         console.log(`[CupcakePM] ${prefix} (${_displayName}):`, safeContent.substring(0, 2000));
@@ -225,6 +227,7 @@ export async function handleRequest(args, activeModelDef, abortSignal) {
         if (streamEnabled) {
             const bridgeCapable = await checkStreamCapability();
             if (bridgeCapable) {
+                /** @type {any[]} */
                 const _chunks = [];
                 const _streamDecoder = new TextDecoder();
                 const _streamStartTime = _startTime;

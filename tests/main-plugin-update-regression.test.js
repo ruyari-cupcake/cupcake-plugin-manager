@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { MAIN_UPDATE_URL } from '../src/lib/endpoints.js';
 
 const packageJson = JSON.parse(
     readFileSync(new URL('../package.json', import.meta.url), 'utf-8')
@@ -37,7 +38,7 @@ describe('main plugin update regression guard', () => {
         expect(headerDisplayName).toBe('Cupcake Provider Manager');
         expect(distName).toBe(headerName);
         expect(distDisplayName).toBe(headerDisplayName);
-        expect(updateUrl).toBe('https://cupcake-plugin-manager-test.vercel.app/api/main-plugin');
+        expect(updateUrl).toBe(MAIN_UPDATE_URL);
         expect(versionOffset).toBeGreaterThanOrEqual(0);
         expect(new TextEncoder().encode(pluginHeader.slice(0, versionOffset) + '//@version').length).toBeLessThanOrEqual(512);
     });

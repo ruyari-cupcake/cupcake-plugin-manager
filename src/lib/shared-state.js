@@ -33,7 +33,7 @@
 /** @typedef {Window & typeof globalThis & { risuai?: any, Risuai?: any }} RisuWindow */
 
 // ─── Constants ───
-export const CPM_VERSION = '1.19.14';
+export const CPM_VERSION = '1.20.0';
 
 // ─── RisuAI Global Reference ───
 const risuWindow = typeof window !== 'undefined'
@@ -104,6 +104,7 @@ export async function safeGetBoolArg(key, defaultValue = false) {
 /**
  * Check if dynamic model fetching is enabled for a given provider.
  * Setting key: cpm_dynamic_<providerName_lowercase> = 'true'.
+ * @param {string} providerName
  */
 export async function isDynamicFetchEnabled(providerName) {
     const key = `cpm_dynamic_${providerName.toLowerCase()}`;

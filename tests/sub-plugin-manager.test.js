@@ -47,8 +47,8 @@ describe('SubPluginManager', () => {
     });
 
     it('compareVersions handles missing version gracefully', () => {
-        expect(SubPluginManager.compareVersions('', '1.0.0')).toBe(0);
-        expect(SubPluginManager.compareVersions('1.0.0', '')).toBe(0);
+        expect(SubPluginManager.compareVersions('', '1.0.0')).toBe(1);  // empty → 0.0.0, remote is newer
+        expect(SubPluginManager.compareVersions('1.0.0', '')).toBe(-1); // empty → 0.0.0, local is newer
         expect(SubPluginManager.compareVersions('', '')).toBe(0);
     });
 });

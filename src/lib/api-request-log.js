@@ -1,3 +1,4 @@
+// @ts-check
 /**
  * api-request-log.js — API Request History (ring buffer for API View feature).
  * Tracks HTTP requests/responses for debugging UI. Max 20 entries.
@@ -6,6 +7,7 @@ import { safeUUID } from './helpers.js';
 
 const _apiRequestHistory = new Map();
 const _API_REQUEST_HISTORY_MAX = 20;
+/** @type {string | null} */
 let _apiRequestLatestId = null;
 
 /**
@@ -45,7 +47,7 @@ export function getLatestApiRequest() {
 
 /**
  * Get all API request entries as an array, newest first.
- * @returns {Array}
+ * @returns {any[]}
  */
 export function getAllApiRequests() {
     const entries = [];

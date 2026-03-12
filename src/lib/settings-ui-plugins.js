@@ -1,3 +1,4 @@
+// @ts-check
 /**
  * settings-ui-plugins.js — Sub-Plugins tab UI.
  * Extracted from settings-ui.js for modularity.
@@ -9,26 +10,30 @@ import { SubPluginManager } from './sub-plugin-manager.js';
 
 /** @typedef {Window & typeof globalThis & { CupcakePM_SubPlugins?: Array<any> }} CupcakePluginWindow */
 
+/** @param {string} id @returns {HTMLElement} */
 function getElement(id) {
     const el = document.getElementById(id);
     if (!el) throw new Error(`[CPM] Missing element: ${id}`);
     return el;
 }
 
+/** @param {any} el @returns {HTMLButtonElement} */
 function asButton(el) {
     return /** @type {HTMLButtonElement} */ (el);
 }
 
+/** @param {any} el @returns {HTMLInputElement} */
 function asInput(el) {
     return /** @type {HTMLInputElement} */ (el);
 }
 
+/** @param {any} el @returns {HTMLElement} */
 function asContainer(el) {
     return /** @type {HTMLElement} */ (el);
 }
 
 // ── Helper: Sub-Plugins tab renderer ──
-export function buildPluginsTabRenderer(setVal) {
+export function buildPluginsTabRenderer(/** @type {any} */ setVal) {
     const renderPluginsTab = () => {
         const listContainer = document.getElementById('cpm-plugins-list');
         if (!listContainer) return;
@@ -131,10 +136,10 @@ export function buildPluginsTabRenderer(setVal) {
         });
         listContainer.querySelectorAll('.cpm-plugin-delete').forEach(btn => {
             btn.addEventListener('click', async (e) => {
-                const id = asButton(e.target).getAttribute('data-id');
+                const id = asButton(e.target).getAttribute('data-id') || '';
                 if (confirm('정말로 이 플러그인을 삭제하시겠습니까?')) {
-                    SubPluginManager.unloadPlugin(id);
-                    await SubPluginManager.remove(id);
+                    SubPluginManager.unloadPlugin(/** @type {string} */ (id));
+                    await SubPluginManager.remove(/** @type {string} */ (id));
                     renderPluginsTab();
                 }
             });
@@ -182,7 +187,7 @@ export function buildPluginsTabRenderer(setVal) {
                     renderPluginsTab();
                 } catch (err) {
                     console.error('[CPM Purge] Error:', err);
-                    alert('❌ 삭제 중 오류가 발생했습니다: ' + (err.message || err));
+                    alert('❌ 삭제 중 오류가 발생했습니다: ' + (/** @type {Error} */ (err).message || err));
                     purgeButton.disabled = false;
                     purgeButton.textContent = '🗑️ CPM 저장 데이터 모두 지우기';
                 }
@@ -206,7 +211,7 @@ export function buildPluginsTabRenderer(setVal) {
     return renderPluginsTab;
 }
 
-export function initUpdateCheckButton(_renderPluginsTab, deps = {}) {
+export function initUpdateCheckButton(/** @type {any} */ _renderPluginsTab, /** @type {Record<string, any>} */ deps = {}) {
     const subPluginManager = deps.subPluginManager || SubPluginManager;
     const updateBtn = /** @type {HTMLButtonElement | null} */ (document.getElementById('cpm-check-updates-btn'));
     if (!updateBtn || updateBtn.dataset.cpmBound === 'true') return;

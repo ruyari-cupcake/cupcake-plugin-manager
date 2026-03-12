@@ -1,3 +1,4 @@
+// @ts-check
 /**
  * csp-exec.js — CSP-safe code execution (replaces eval() in V3 iframe sandbox).
  * Uses <script> tag injection with nonce for sub-plugin execution.
@@ -36,19 +37,19 @@ export function _executeViaScriptTag(code, pluginName) {
             ? safeUUID().replace(/-/g, '')
             : Math.random().toString(36).slice(2));
         const safeName = JSON.stringify(pluginName || 'unknown');
-        let scriptEl = null;
+        let scriptEl = /** @type {HTMLScriptElement | null} */ (null);
 
         const timeout = setTimeout(() => {
-            if (window[cbId]) {
-                delete window[cbId];
+            if (/** @type {any} */ (window)[cbId]) {
+                delete /** @type {any} */ (window)[cbId];
                 try { if (scriptEl && scriptEl.parentNode) scriptEl.parentNode.removeChild(scriptEl); } catch (_) {}
                 reject(new Error(`Plugin ${pluginName} script timed out (CSP block?)`));
             }
         }, 10000);
 
-        window[cbId] = (err) => {
+        /** @type {any} */ (window)[cbId] = (/** @type {any} */ err) => {
             clearTimeout(timeout);
-            delete window[cbId];
+            delete /** @type {any} */ (window)[cbId];
             try { if (scriptEl && scriptEl.parentNode) scriptEl.parentNode.removeChild(scriptEl); } catch (_) {}
             if (err) reject(err);
             else resolve();

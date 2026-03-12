@@ -4,7 +4,7 @@
  * handlePmCommand, and additional boot flow edge cases.
  * @vitest-environment jsdom
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const h = vi.hoisted(() => {
     const mockDoc = {
@@ -126,7 +126,7 @@ vi.mock('../src/lib/router.js', () => ({
 }));
 vi.mock('../src/lib/stream-utils.js', () => ({
     checkStreamCapability: vi.fn(async () => true),
-    collectStream: vi.fn(async (s) => 'collected'),
+    collectStream: vi.fn(async (_s) => 'collected'),
 }));
 vi.mock('../src/lib/copilot-token.js', () => ({
     setupCopilotProvider: vi.fn(async () => {}),
@@ -150,31 +150,7 @@ describe('init.js — utility coverage', () => {
     });
 });
 
-// Test the keyboard shortcut handler separately
-describe('Keyboard shortcut handler', () => {
-    it('detects Ctrl+Shift+P as hotkey', () => {
-        const event = new KeyboardEvent('keydown', { key: 'P', ctrlKey: true, shiftKey: true });
-        expect(event.ctrlKey).toBe(true);
-        expect(event.shiftKey).toBe(true);
-        expect(event.key).toBe('P');
-    });
-
-    it('detects Cmd+Shift+P on Mac', () => {
-        const event = new KeyboardEvent('keydown', { key: 'P', metaKey: true, shiftKey: true });
-        expect(event.metaKey).toBe(true);
-        expect(event.shiftKey).toBe(true);
-    });
-});
-
-// Test touch gesture detection
-describe('Touch gesture detection', () => {
-    it('detects 3-finger tap gesture', () => {
-        // Simulate a touch event with 3 touches
-        const touches = [
-            { identifier: 0, clientX: 100, clientY: 100 },
-            { identifier: 1, clientX: 150, clientY: 100 },
-            { identifier: 2, clientX: 200, clientY: 100 },
-        ];
-        expect(touches.length).toBe(3);
-    });
-});
+// NOTE: Previous keyboard/touch tests removed — they were only asserting
+// browser KeyboardEvent API properties, not init.js handler logic.
+// The actual hotkey handler (Ctrl+Shift+Alt+P) and 4-finger touch gesture
+// are properly tested in init-branches.test.js with real handler invocation.

@@ -3,7 +3,7 @@
  * Covers: safeUUID fallback, getSubPluginFileAccept, extractImageUrlFromPart edge cases,
  * all uncovered branches in lines 20-22, 101-109.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import {
     safeUUID,
     safeStringify,

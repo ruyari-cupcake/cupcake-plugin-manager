@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
     parseOpenAINonStreamingResponse,
     parseResponsesAPINonStreamingResponse,
@@ -6,9 +6,11 @@ import {
     parseClaudeNonStreamingResponse,
 } from '../src/lib/response-parsers.js';
 import { _takeTokenUsage, _tokenUsageStore } from '../src/lib/token-usage.js';
+import { ThoughtSignatureCache } from '../src/lib/format-gemini.js';
 
 beforeEach(() => {
     _tokenUsageStore.clear();
+    ThoughtSignatureCache.clear();
 });
 
 describe('parseOpenAINonStreamingResponse', () => {
@@ -62,6 +64,35 @@ describe('parseOpenAINonStreamingResponse', () => {
         const result = parseOpenAINonStreamingResponse(data);
         expect(result.content).toBe('part1part2');
     });
+
+    it('prefers reasoning_content over OpenRouter reasoning and stores token usage', () => {
+        const data = {
+            choices: [{
+                reasoning_content: 'strict reasoning',
+                reasoning: 'secondary reasoning',
+                message: { content: 'final answer', reasoning: 'message reasoning' },
+            }],
+            usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+        };
+
+        const result = parseOpenAINonStreamingResponse(data, 'req-openai-usage');
+        const usage = _takeTokenUsage('req-openai-usage', false);
+
+        expect(result.content).toContain('strict reasoning');
+        expect(result.content).not.toContain('secondary reasoning');
+        expect(result.content).not.toContain('message reasoning');
+        expect(usage).toMatchObject({ input: 10, output: 5, total: 15 });
+    });
+
+    it('returns empty-response fallback when message exists but content normalizes empty', () => {
+        const data = {
+            choices: [{ message: { content: [] } }],
+        };
+
+        const result = parseOpenAINonStreamingResponse(data);
+        expect(result.success).toBe(false);
+        expect(result.content).toContain('[OpenAI] Empty response');
+    });
 });
 
 describe('parseResponsesAPINonStreamingResponse', () => {
@@ -99,6 +130,26 @@ describe('parseResponsesAPINonStreamingResponse', () => {
     it('returns failure for empty output', () => {
         const result = parseResponsesAPINonStreamingResponse({});
         expect(result.success).toBe(false);
+    });
+
+    it('ignores malformed output items and stores usage metadata when present', () => {
+        const data = {
+            output: [
+                null,
+                'bad-item',
+                { type: 'reasoning', summary: [{ type: 'other' }, { type: 'summary_text', text: 'kept reasoning' }] },
+                { type: 'message', content: [{ type: 'ignored' }, { type: 'output_text', text: 'usable text' }] },
+            ],
+            usage: { prompt_tokens: 8, completion_tokens: 4, total_tokens: 12 },
+        };
+
+        const result = parseResponsesAPINonStreamingResponse(data, 'req-responses-usage');
+        const usage = _takeTokenUsage('req-responses-usage', false);
+
+        expect(result.success).toBe(true);
+        expect(result.content).toContain('kept reasoning');
+        expect(result.content).toContain('usable text');
+        expect(usage).toMatchObject({ input: 8, output: 4, total: 12 });
     });
 });
 
@@ -159,6 +210,43 @@ describe('parseGeminiNonStreamingResponse', () => {
         expect(result.success).toBe(false);
         expect(result.content).toContain('PROHIBITED_CONTENT');
     });
+
+    it('saves thought signature and usage metadata when enabled', () => {
+        const saveSpy = vi.spyOn(ThoughtSignatureCache, 'save');
+        const data = {
+            candidates: [{
+                content: {
+                    parts: [
+                        { thought: true, text: 'hidden chain', thoughtSignature: 'sig-123' },
+                        { text: 'visible answer' },
+                    ],
+                },
+            }],
+            usageMetadata: { promptTokenCount: 11, candidatesTokenCount: 7, totalTokenCount: 18 },
+        };
+
+        const result = parseGeminiNonStreamingResponse(data, { useThoughtSignature: true }, 'req-gemini-usage');
+        const usage = _takeTokenUsage('req-gemini-usage', false);
+
+        expect(result.content).toContain('hidden chain');
+        expect(result.content).toContain('visible answer');
+        expect(saveSpy).toHaveBeenCalledWith(expect.stringContaining('hidden chain'), 'sig-123');
+        expect(usage).toMatchObject({ input: 11, output: 7, total: 18 });
+    });
+
+    it('closes a trailing thought block when no visible text follows', () => {
+        const data = {
+            candidates: [{
+                content: {
+                    parts: [{ thought: true, text: 'unfinished thought' }],
+                },
+            }],
+        };
+
+        const result = parseGeminiNonStreamingResponse(data);
+        expect(result.content).toContain('<Thoughts>');
+        expect(result.content).toContain('</Thoughts>');
+    });
 });
 
 describe('parseClaudeNonStreamingResponse', () => {
@@ -174,6 +262,13 @@ describe('parseClaudeNonStreamingResponse', () => {
         const result = parseClaudeNonStreamingResponse(data);
         expect(result.success).toBe(false);
         expect(result.content).toContain('Rate limited');
+    });
+
+    it('handles embedded error objects even when type is not error', () => {
+        const data = { error: { message: 'anthropic request failed' } };
+        const result = parseClaudeNonStreamingResponse(data);
+        expect(result.success).toBe(false);
+        expect(result.content).toContain('anthropic request failed');
     });
 
     it('wraps thinking blocks', () => {
@@ -265,5 +360,56 @@ describe('parseClaudeNonStreamingResponse', () => {
         expect(usage.output).toBe(20);
         expect(usage.reasoning).toBe(16);
         expect(usage.reasoningEstimated).toBe(true);
+    });
+
+    it('uses top-level OpenRouter reasoning when message.reasoning is absent', () => {
+        const result = parseOpenAINonStreamingResponse({
+            choices: [{
+                reasoning: 'top-level reasoning',
+                message: { content: 'final text' },
+            }],
+        });
+
+        expect(result.content).toContain('top-level reasoning');
+        expect(result.content).toContain('final text');
+    });
+
+    it('returns the empty fallback when Responses API items contain no usable text or reasoning', () => {
+        const result = parseResponsesAPINonStreamingResponse({
+            output: [
+                { type: 'reasoning', summary: [{ type: 'ignored', text: 'x' }] },
+                { type: 'message', content: [{ type: 'ignored', text: 'y' }] },
+            ],
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.content).toContain('[Responses API] Empty response');
+    });
+
+    it('supports snake_case thought_signature fields for Gemini responses', () => {
+        const saveSpy = vi.spyOn(ThoughtSignatureCache, 'save');
+        const result = parseGeminiNonStreamingResponse({
+            candidates: [{
+                content: {
+                    parts: [
+                        { thought: true, text: 'hidden thought', thought_signature: 'snake-sig' },
+                        { text: 'visible text' },
+                    ],
+                },
+            }],
+        }, { useThoughtSignature: true });
+
+        expect(result.content).toContain('hidden thought');
+        expect(saveSpy).toHaveBeenCalledWith(expect.stringContaining('hidden thought'), 'snake-sig');
+    });
+
+    it('falls back to serialized error details when Claude error objects have no message field', () => {
+        const result = parseClaudeNonStreamingResponse({
+            error: { type: 'overloaded_error', code: 'busy' },
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.content).toContain('overloaded_error');
+        expect(result.content).toContain('busy');
     });
 });

@@ -2,6 +2,7 @@
 node_modules/
 dist/
 coverage/
+src/lib/tailwind-css.generated.js
 
 # Artifacts / Backups
 *복사본*
@@ -23,3 +24,4 @@ INVESTIGATION_REPORT*.md
 # Dev artifacts
 backup_before_*/
 pr6_test/
+tsc_check*.txt

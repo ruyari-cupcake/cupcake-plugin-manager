@@ -1,3 +1,4 @@
+// @ts-check
 /**
  * aws-signer.js — AWS Signature Version 4 signer.
  * Self-contained implementation using Web Crypto API (available in iframe sandbox).
@@ -20,6 +21,10 @@ const UNSIGNABLE_HEADERS = new Set([
 
 const HEX_CHARS = '0123456789abcdef'.split('');
 
+/**
+ * @param {ArrayBuffer} arrayBuffer
+ * @returns {string}
+ */
 export function buf2hex(arrayBuffer) {
     const buffer = new Uint8Array(arrayBuffer);
     let out = '';
@@ -31,10 +36,19 @@ export function buf2hex(arrayBuffer) {
     return out;
 }
 
+/**
+ * @param {string} urlEncodedStr
+ * @returns {string}
+ */
 export function encodeRfc3986(urlEncodedStr) {
-    return urlEncodedStr.replace(/[!'()*]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase());
+    return urlEncodedStr.replace(/[!'()*]/g, (/** @type {string} */ c) => '%' + c.charCodeAt(0).toString(16).toUpperCase());
 }
 
+/**
+ * @param {string|ArrayBuffer} key
+ * @param {string} string
+ * @returns {Promise<ArrayBuffer>}
+ */
 export async function hmac(key, string) {
     const cryptoKey = await crypto.subtle.importKey(
         'raw',
@@ -46,6 +60,10 @@ export async function hmac(key, string) {
     return crypto.subtle.sign('HMAC', cryptoKey, encoder.encode(string));
 }
 
+/**
+ * @param {string|ArrayBuffer} content
+ * @returns {Promise<ArrayBuffer>}
+ */
 export async function hash(content) {
     return crypto.subtle.digest(
         'SHA-256',
@@ -53,6 +71,11 @@ export async function hash(content) {
     );
 }
 
+/**
+ * @param {URL} url
+ * @param {Headers} headers
+ * @returns {[string, string]}
+ */
 export function guessServiceRegion(url, headers) {
     const { hostname, pathname } = url;
 
@@ -91,7 +114,7 @@ export function guessServiceRegion(url, headers) {
         [service, region] = [region, service];
     }
 
-    return [HOST_SERVICES[service] || service, region || ''];
+    return [/** @type {Record<string, string>} */ (HOST_SERVICES)[service] || service, region || ''];
 }
 
 /**
@@ -99,6 +122,24 @@ export function guessServiceRegion(url, headers) {
  * Signs HTTP requests for AWS services (Bedrock, STS, etc.) using Web Crypto API.
  */
 export class AwsV4Signer {
+    /**
+     * @param {object} options
+     * @param {string} [options.method]
+     * @param {string|URL} options.url
+     * @param {HeadersInit} [options.headers]
+     * @param {string|ArrayBuffer|null} [options.body]
+     * @param {string} options.accessKeyId
+     * @param {string} options.secretAccessKey
+     * @param {string} [options.sessionToken]
+     * @param {string} [options.service]
+     * @param {string} [options.region]
+     * @param {Map<string, ArrayBuffer>} [options.cache]
+     * @param {string} [options.datetime]
+     * @param {boolean} [options.signQuery]
+     * @param {boolean} [options.appendSessionToken]
+     * @param {boolean} [options.allHeaders]
+     * @param {boolean} [options.singleEncode]
+     */
     constructor({ method, url, headers, body, accessKeyId, secretAccessKey, sessionToken, service, region, cache, datetime, signQuery, appendSessionToken, allHeaders, singleEncode }) {
         if (url == null) throw new TypeError('url is a required option');
         if (accessKeyId == null) throw new TypeError('accessKeyId is a required option');

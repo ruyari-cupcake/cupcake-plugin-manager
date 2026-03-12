@@ -1,3 +1,4 @@
+// @ts-check
 /**
  * key-pool.js — API Key rotation engine.
  * Supports whitespace-separated key pools and JSON credential rotation (Vertex AI).
@@ -9,13 +10,14 @@
  * Random pick per request; on 429/529/503, drain failed key and retry.
  */
 export const KeyPool = {
+    /** @type {Record<string, any>} */
     _pools: {},
-    /** Injected safeGetArg function. Set via setGetArgFn(). */
+    /** Injected safeGetArg function. Set via setGetArgFn(). @type {((key: string, defaultValue?: string) => Promise<string>) | null} */
     _getArgFn: null,
 
     /**
      * Set the argument retrieval function (dependency injection).
-     * @param {function} fn - async (key, defaultValue) => string
+     * @param {(key: string, defaultValue?: string) => Promise<string>} fn
      */
     setGetArgFn(fn) {
         this._getArgFn = fn;
@@ -24,6 +26,7 @@ export const KeyPool = {
     /**
      * Parse keys from the setting string (whitespace-separated), cache them,
      * and return a random key from the pool.
+     * @param {string} argName
      */
     async pick(argName) {
         const pool = this._pools[argName];
@@ -46,6 +49,8 @@ export const KeyPool = {
 
     /**
      * Remove a failed key from the pool. Returns remaining count.
+     * @param {string} argName
+     * @param {string} failedKey
      */
     drain(argName, failedKey) {
         const pool = this._pools[argName];
@@ -57,6 +62,7 @@ export const KeyPool = {
 
     /**
      * Get the number of remaining keys in the pool.
+     * @param {string} argName
      */
     remaining(argName) {
         return this._pools[argName]?.keys?.length || 0;
@@ -64,6 +70,7 @@ export const KeyPool = {
 
     /**
      * Force re-parse keys from settings on next pick.
+     * @param {string} argName
      */
     reset(argName) {
         delete this._pools[argName];
@@ -71,10 +78,13 @@ export const KeyPool = {
 
     /**
      * Pick key → fetchFn(key) → on retryable error, drain and retry.
+     * @param {string} argName
+     * @param {(key: string) => Promise<any>} fetchFn
+     * @param {{maxRetries?: number, isRetryable?: (result: any) => boolean}} [opts]
      */
     async withRotation(argName, fetchFn, opts = {}) {
         const maxRetries = opts.maxRetries || 30;
-        const isRetryable = opts.isRetryable || ((result) => {
+        const isRetryable = opts.isRetryable || ((/** @type {any} */ result) => {
             if (!result._status) return false;
             return result._status === 429 || result._status === 529 || result._status === 503;
         });
@@ -102,11 +112,16 @@ export const KeyPool = {
 
     // ── JSON Credential Rotation (Vertex AI 등 JSON 크레덴셜용) ──
 
+    /** @param {string} raw */
     _looksLikeWindowsPath(raw) {
         const trimmed = (raw || '').trim();
         return /^[A-Za-z]:\\/.test(trimmed) || /^\\\\[^\\]/.test(trimmed);
     },
 
+    /**
+     * @param {string} raw
+     * @param {any} [error]
+     */
     _buildJsonCredentialError(raw, error) {
         if (this._looksLikeWindowsPath(raw)) {
             return new Error('JSON 인증 정보 대신 Windows 파일 경로가 입력되었습니다. 파일 경로가 아니라 Service Account JSON 본문 전체를 붙여넣어야 합니다.');
@@ -123,6 +138,7 @@ export const KeyPool = {
     /**
      * Extract individual JSON objects from raw textarea input.
      * Supports: single, comma-separated, JSON array, or newline-separated.
+     * @param {string} raw
      */
     _parseJsonCredentials(raw) {
         const trimmed = (raw || '').trim();
@@ -146,7 +162,7 @@ export const KeyPool = {
             const obj = JSON.parse(trimmed);
             if (obj && typeof obj === 'object' && !Array.isArray(obj)) return [trimmed];
         } catch (error) { lastError = error; }
-        if (lastError && /Bad Unicode escape/i.test(lastError.message || '')) {
+        if (lastError && /Bad Unicode escape/i.test(/** @type {Error} */ (lastError).message || '')) {
             throw this._buildJsonCredentialError(trimmed, lastError);
         }
         return [];
@@ -155,6 +171,7 @@ export const KeyPool = {
     /**
      * Parse JSON credentials from a textarea field, cache them,
      * and return a random one from the pool.
+     * @param {string} argName
      */
     async pickJson(argName) {
         const getArg = this._getArgFn;
@@ -166,7 +183,7 @@ export const KeyPool = {
                 const jsons = this._parseJsonCredentials(raw);
                 this._pools[argName] = { lastRaw: raw, keys: jsons, error: '' };
             } catch (error) {
-                this._pools[argName] = { lastRaw: raw, keys: [], error: error.message };
+                this._pools[argName] = { lastRaw: raw, keys: [], error: /** @type {Error} */ (error).message };
             }
         }
         const keys = this._pools[argName].keys;
@@ -176,10 +193,13 @@ export const KeyPool = {
 
     /**
      * Like withRotation but uses pickJson for JSON credential parsing.
+     * @param {string} argName
+     * @param {(key: string) => Promise<any>} fetchFn
+     * @param {{maxRetries?: number, isRetryable?: (result: any) => boolean}} [opts]
      */
     async withJsonRotation(argName, fetchFn, opts = {}) {
         const maxRetries = opts.maxRetries || 30;
-        const isRetryable = opts.isRetryable || ((result) => {
+        const isRetryable = opts.isRetryable || ((/** @type {any} */ result) => {
             if (!result._status) return false;
             return result._status === 429 || result._status === 529 || result._status === 503;
         });

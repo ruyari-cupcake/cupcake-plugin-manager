@@ -188,6 +188,51 @@ describe('createSSEStream — base SSE stream', () => {
         const text = await readStream(stream);
         expect(text).toBe('ok');
     });
+
+    it('surfaces non-abort reader errors after logging accumulated content', async () => {
+        const logFn = vi.fn();
+        setApiRequestLogger(logFn);
+        const stream = createSSEStream(
+            makeErrorResponse(['data: partial\n\n'], new Error('reader exploded')),
+            (line) => line.startsWith('data:') ? line.slice(5).trim() : null,
+            undefined,
+            undefined,
+            'req-error'
+        );
+
+        const reader = stream.getReader();
+        await expect((async () => {
+            while (true) {
+                const { done } = await reader.read();
+                if (done) break;
+            }
+        })()).rejects.toThrow('reader exploded');
+        expect(logFn).toHaveBeenCalledWith('req-error', expect.objectContaining({ response: expect.stringContaining('reader exploded') }));
+    });
+
+    it('treats AbortError from the reader as a graceful close', async () => {
+        const logFn = vi.fn();
+        setApiRequestLogger(logFn);
+        const abortError = new DOMException('aborted by host', 'AbortError');
+        const encoded = new TextEncoder().encode('data: partial\n\n');
+        let readCount = 0;
+        const response = {
+            body: {
+                getReader: () => ({
+                    read: async () => {
+                        if (readCount++ === 0) return { done: false, value: encoded };
+                        throw abortError;
+                    },
+                    cancel: vi.fn(),
+                }),
+            },
+        };
+        const stream = createSSEStream(response, (line) => line.startsWith('data:') ? line.slice(5).trim() : null, undefined, undefined, 'req-abort');
+
+        const text = await readStream(stream);
+        expect(text).toBe('partial');
+        expect(logFn).toHaveBeenCalledWith('req-abort', expect.objectContaining({ response: 'partial' }));
+    });
 });
 
 describe('createOpenAISSEStream — additional coverage', () => {
@@ -258,6 +303,30 @@ describe('createOpenAISSEStream — additional coverage', () => {
         const stream = createOpenAISSEStream(response, undefined, 'req-usage');
         await readStream(stream);
         expect(h.setTokenUsage).toHaveBeenCalled();
+    });
+
+    it('handles delta.reasoning with empty string (falsy but present)', async () => {
+        const response = makeResponseFromChunks([
+            'data: {"choices":[{"delta":{"reasoning":""}}]}\n\n',
+            'data: {"choices":[{"delta":{"content":"answer"}}]}\n\n',
+            'data: [DONE]\n\n',
+        ]);
+        const stream = createOpenAISSEStream(response);
+        const text = await readStream(stream);
+        // Empty string reasoning should be skipped (falsy check) — no Thoughts wrapper
+        expect(text).toBe('answer');
+    });
+
+    it('handles delta.content with empty string between real content', async () => {
+        const response = makeResponseFromChunks([
+            'data: {"choices":[{"delta":{"content":"hello"}}]}\n\n',
+            'data: {"choices":[{"delta":{"content":""}}]}\n\n',
+            'data: {"choices":[{"delta":{"content":" world"}}]}\n\n',
+            'data: [DONE]\n\n',
+        ]);
+        const stream = createOpenAISSEStream(response);
+        const text = await readStream(stream);
+        expect(text).toBe('hello world');
     });
 });
 
@@ -429,6 +498,24 @@ describe('createAnthropicSSEStream — deep coverage', () => {
         const stream = createAnthropicSSEStream(response, ac.signal);
         const text = await readStream(stream);
         expect(typeof text).toBe('string');
+    });
+
+    it('flushes token usage when anthropic stream is cancelled mid-flight', async () => {
+        const stream = createAnthropicSSEStream(
+            makeResponseFromChunks([
+                'event: message_start\ndata: {"message":{"usage":{"input_tokens":9}}}\n\n',
+                'event: message_delta\ndata: {"usage":{"output_tokens":4}}\n\n',
+                'event: content_block_delta\ndata: {"delta":{"type":"text_delta","text":"visible"}}\n\n',
+            ]),
+            undefined,
+            'req-cancel-usage'
+        );
+
+        const reader = stream.getReader();
+        await reader.read();
+        reader.releaseLock();
+        await stream.cancel();
+        expect(h.setTokenUsage).toHaveBeenCalledWith('req-cancel-usage', expect.anything(), true);
     });
 });
 

@@ -5,7 +5,7 @@
  * purgeAllCpmData, executeEnabled.
  * @vitest-environment jsdom
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const h = vi.hoisted(() => ({
     risu: {
@@ -89,6 +89,12 @@ describe('SubPluginManager — deep coverage', () => {
     beforeEach(() => {
         vi.clearAllMocks();
         SubPluginManager.plugins = [];
+        state.ALL_DEFINED_MODELS = [];
+        pendingDynamicFetchers.length = 0;
+        registeredProviderTabs.length = 0;
+        Object.keys(customFetchers).forEach((key) => delete customFetchers[key]);
+        Object.keys(_pluginRegistrations).forEach((key) => delete _pluginRegistrations[key]);
+        Object.keys(_pluginCleanupHooks).forEach((key) => delete _pluginCleanupHooks[key]);
         // Reset window globals
         delete window._cpmVersionChecked;
         delete window._cpmMainVersionChecked;
@@ -148,6 +154,12 @@ console.log('hello');
         it('returns 0 for empty/null versions', () => {
             expect(SubPluginManager.compareVersions('', '')).toBe(0);
             expect(SubPluginManager.compareVersions(null, null)).toBe(0);
+        });
+        it('treats empty input as 0.0.0', () => {
+            expect(SubPluginManager.compareVersions('', '1.0.0')).toBe(1);  // 0.0.0 vs 1.0.0 → remote newer
+            expect(SubPluginManager.compareVersions('1.0.0', '')).toBe(-1); // 1.0.0 vs 0.0.0 → local newer
+            expect(SubPluginManager.compareVersions(null, '1.0.0')).toBe(1);
+            expect(SubPluginManager.compareVersions('1.0.0', null)).toBe(-1);
         });
         it('strips non-numeric characters', () => {
             expect(SubPluginManager.compareVersions('v1.0.0', 'v1.0.1')).toBe(1);
@@ -323,6 +335,31 @@ console.log('hello');
             _pluginRegistrations[pluginId] = { providerNames: ['TestProvider'], tabObjects: [], fetcherEntries: [] };
             SubPluginManager.unloadPlugin(pluginId);
             expect(cleanupFn).toHaveBeenCalled();
+            delete window._cpmTestProviderCleanup;
+        });
+
+        it('matches provider names with spaces against window cleanup keys', () => {
+            const pluginId = 'test-plugin';
+            const cleanupFn = vi.fn();
+            window._cpmOpenAICleanup = cleanupFn;
+            _pluginRegistrations[pluginId] = { providerNames: ['Open AI'], tabObjects: [], fetcherEntries: [] };
+
+            SubPluginManager.unloadPlugin(pluginId);
+
+            expect(cleanupFn).toHaveBeenCalled();
+            delete window._cpmOpenAICleanup;
+        });
+
+        it('handles async window cleanup rejection gracefully', async () => {
+            const pluginId = 'test-plugin';
+            const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+            window._cpmTestProviderCleanup = vi.fn(() => Promise.reject(new Error('window async fail')));
+            _pluginRegistrations[pluginId] = { providerNames: ['TestProvider'], tabObjects: [], fetcherEntries: [] };
+
+            SubPluginManager.unloadPlugin(pluginId);
+            await Promise.resolve();
+
+            expect(warnSpy).toHaveBeenCalledWith('[CPM Loader] window._cpmTestProviderCleanup() error:', 'window async fail');
             delete window._cpmTestProviderCleanup;
         });
 
@@ -539,6 +576,22 @@ console.log('hello');
             expect(removedKeys).toContain('cpm-legacy');
             expect(removedKeys).not.toContain('other_key');
         });
+
+        it('clears sensitive CPM globals from window memory', async () => {
+            window._cpmCopilotMachineId = 'machine';
+            window._cpmCopilotSessionId = 'session';
+            window.CupcakePM = { loaded: true };
+            window.CPM_VERSION = '1.19.6';
+            window.cpmShortcutRegistered = true;
+
+            await SubPluginManager.purgeAllCpmData();
+
+            expect(window._cpmCopilotMachineId).toBeUndefined();
+            expect(window._cpmCopilotSessionId).toBeUndefined();
+            expect(window.CupcakePM).toBeUndefined();
+            expect(window.CPM_VERSION).toBeUndefined();
+            expect(window.cpmShortcutRegistered).toBeUndefined();
+        });
     });
 
     // ── hotReload / hotReloadAll ──
@@ -562,6 +615,9 @@ console.log('hello');
             const plugin = { id: 'p1', name: 'Test', enabled: true, code: 'console.log("test")' };
             SubPluginManager.plugins = [plugin];
             _pluginRegistrations['p1'] = { providerNames: ['DynProvider'], tabObjects: [], fetcherEntries: [] };
+            vi.spyOn(SubPluginManager, 'executeOne').mockImplementation(async () => {
+                _pluginRegistrations['p1'] = { providerNames: ['DynProvider'], tabObjects: [], fetcherEntries: [] };
+            });
             pendingDynamicFetchers.push({
                 name: 'DynProvider',
                 fetchDynamicModels: vi.fn(async () => [{ id: 'm1', name: 'DynModel' }]),
@@ -575,6 +631,9 @@ console.log('hello');
             const plugin = { id: 'p1', name: 'Test', enabled: true, code: 'console.log("test")' };
             SubPluginManager.plugins = [plugin];
             _pluginRegistrations['p1'] = { providerNames: ['DynProvider'], tabObjects: [], fetcherEntries: [] };
+            vi.spyOn(SubPluginManager, 'executeOne').mockImplementation(async () => {
+                _pluginRegistrations['p1'] = { providerNames: ['DynProvider'], tabObjects: [], fetcherEntries: [] };
+            });
             pendingDynamicFetchers.push({
                 name: 'DynProvider',
                 fetchDynamicModels: vi.fn(async () => []),
@@ -582,6 +641,45 @@ console.log('hello');
             isDynamicFetchEnabled.mockResolvedValue(false);
             const result = await SubPluginManager.hotReload('p1');
             expect(result).toBe(true);
+        });
+
+        it('handles dynamic fetch failures without aborting hot reload', async () => {
+            const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+            const plugin = { id: 'p1', name: 'Test', enabled: true, code: 'console.log("test")' };
+            SubPluginManager.plugins = [plugin];
+            _pluginRegistrations['p1'] = { providerNames: ['DynProvider'], tabObjects: [], fetcherEntries: [] };
+            vi.spyOn(SubPluginManager, 'executeOne').mockImplementation(async () => {
+                _pluginRegistrations['p1'] = { providerNames: ['DynProvider'], tabObjects: [], fetcherEntries: [] };
+            });
+            pendingDynamicFetchers.push({
+                name: 'DynProvider',
+                fetchDynamicModels: vi.fn(async () => { throw new Error('fetch failed'); }),
+            });
+            isDynamicFetchEnabled.mockResolvedValue(true);
+
+            const result = await SubPluginManager.hotReload('p1');
+            expect(result).toBe(true);
+            expect(warnSpy.mock.calls.some(call => String(call[0]).includes('Hot-reload dynamic fetch failed for DynProvider'))).toBe(true);
+            warnSpy.mockRestore();
+        });
+
+        it('ignores empty dynamic model lists during hot reload', async () => {
+            const plugin = { id: 'p1', name: 'Test', enabled: true, code: 'console.log("test")' };
+            SubPluginManager.plugins = [plugin];
+            state.ALL_DEFINED_MODELS = [{ provider: 'KeepMe', name: 'Existing' }];
+            _pluginRegistrations['p1'] = { providerNames: ['DynProvider'], tabObjects: [], fetcherEntries: [] };
+            vi.spyOn(SubPluginManager, 'executeOne').mockImplementation(async () => {
+                _pluginRegistrations['p1'] = { providerNames: ['DynProvider'], tabObjects: [], fetcherEntries: [] };
+            });
+            pendingDynamicFetchers.push({
+                name: 'DynProvider',
+                fetchDynamicModels: vi.fn(async () => []),
+            });
+            isDynamicFetchEnabled.mockResolvedValue(true);
+
+            const result = await SubPluginManager.hotReload('p1');
+            expect(result).toBe(true);
+            expect(state.ALL_DEFINED_MODELS).toEqual([{ provider: 'KeepMe', name: 'Existing' }]);
         });
 
         it('does not execute disabled plugin after unload', async () => {

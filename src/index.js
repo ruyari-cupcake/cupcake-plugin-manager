@@ -1,3 +1,4 @@
+// @ts-check
 /**
  * Cupcake Provider Manager — Main Entry Point
  *
@@ -5,9 +6,10 @@
  * from src/lib/ and re-exports them as the unified CupcakeProviderManager
  * IIFE bundle for the RisuAI V3 iframe sandbox.
  *
- * Module Map (27 modules — 100% extraction from provider-manager.js):
+ * Module Map (29 modules — 100% extraction from provider-manager.js):
  *
  * Pure Utilities:
+ *   endpoints.js          → Centralized remote URL constants (base, versions, update)
  *   shared-state.js      → CPM_VERSION, Risu ref, mutable state, registries, arg helpers
  *   helpers.js            → safeUUID, safeStringify, content/multimodal checks
  *   sanitize.js           → Message sanitization and content normalization
@@ -36,8 +38,10 @@
  *   stream-utils.js       → Stream collection and bridge detection
  *
  * Core Logic:
+ *   auto-updater.js       → Auto-update engine (version check, download, verify, install)
+ *   update-toast.js       → Update notification toast UI (sub-plugin + main)
  *   settings-backup.js    → Persistent settings backup via pluginStorage
- *   sub-plugin-manager.js → Sub-plugin CRUD + hot-reload + update check
+ *   sub-plugin-manager.js → Sub-plugin CRUD + hot-reload (spreads auto-updater/toast)
  *   fetch-custom.js       → fetchCustom (main API fetcher, all formats)
  *   router.js             → handleRequest / fetchByProviderId (routing)
  *   cupcake-api.js        → window.CupcakePM public API surface
@@ -46,6 +50,13 @@
  */
 
 // ─── Pure Utilities ───
+export {
+    CPM_BASE_URL,
+    VERSIONS_URL,
+    MAIN_UPDATE_URL,
+    UPDATE_BUNDLE_URL,
+} from './lib/endpoints.js';
+
 export {
     CPM_VERSION, Risu, state,
     safeGetArg, safeGetBoolArg, isDynamicFetchEnabled,
@@ -183,6 +194,10 @@ export { _extractNonce, _executeViaScriptTag } from './lib/csp-exec.js';
 
 // ─── Settings Backup ───
 export { SettingsBackup } from './lib/settings-backup.js';
+
+// ─── Auto-Updater & Toast (extracted from sub-plugin-manager) ───
+export { _computeSHA256, autoUpdaterMethods } from './lib/auto-updater.js';
+export { updateToastMethods } from './lib/update-toast.js';
 
 // ─── Sub-Plugin Manager ───
 export { SubPluginManager, setExposeScopeFunction } from './lib/sub-plugin-manager.js';

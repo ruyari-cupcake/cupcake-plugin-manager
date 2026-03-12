@@ -1,3 +1,4 @@
+// @ts-check
 /**
  * token-toast.js — Lightweight toast notification for token usage display.
  * Shows input/output/reasoning/cached token counts at top-right corner.
@@ -22,7 +23,7 @@ export async function showTokenUsageToast(modelName, usage, durationMs) {
         if (existing) { try { await existing.remove(); } catch (_) { } }
 
         // Format numbers with commas
-        const fmt = (n) => n != null ? n.toLocaleString() : '0';
+        const fmt = (/** @type {number} */ n) => n != null ? n.toLocaleString() : '0';
         const durationStr = durationMs ? `${(durationMs / 1000).toFixed(1)}s` : '';
 
         // Build detail parts
@@ -98,6 +99,6 @@ export async function showTokenUsageToast(modelName, usage, durationMs) {
         }, 6000);
 
     } catch (e) {
-        console.debug('[CPM TokenToast] Failed:', e.message);
+        console.debug('[CPM TokenToast] Failed:', /** @type {Error} */ (e).message);
     }
 }

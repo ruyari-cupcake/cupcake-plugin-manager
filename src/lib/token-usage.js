@@ -20,7 +20,7 @@ function _toFiniteTokenInt(value) {
 /**
  * Try known explicit Anthropic/proxy reasoning token fields first.
  * Future-proofed for proxy adapters that may expose separate reasoning counts.
- * @param {Object} raw
+ * @param {Record<string, any>} raw
  * @returns {number}
  */
 function _extractAnthropicReasoningTokens(raw) {
@@ -82,7 +82,7 @@ export function _setTokenUsage(requestId, usage, isStream = false) {
     // Evict oldest entries when store exceeds max size to prevent memory leak
     if (_tokenUsageStore.size > _TOKEN_USAGE_STORE_MAX) {
         const it = _tokenUsageStore.keys();
-        _tokenUsageStore.delete(it.next().value);
+        _tokenUsageStore.delete(/** @type {string} */ (it.next().value));
     }
 }
 
@@ -109,7 +109,7 @@ export function _takeTokenUsage(requestId, isStream = false) {
 
 /**
  * Normalize token usage from different API formats into a unified shape.
- * @param {Object} raw - Raw usage object from API response
+ * @param {Record<string, any>} raw - Raw usage object from API response
  * @param {'openai'|'anthropic'|'gemini'} format
  * @param {{ anthropicHasThinking?: boolean, anthropicVisibleText?: string }} [meta]
  * @returns {TokenUsage | null}

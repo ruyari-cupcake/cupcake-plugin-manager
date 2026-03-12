@@ -53,8 +53,36 @@ function extractVersionFromHeader(filePath) {
 }
 
 // ════════════════════════════════════════════════════════════════
-// Step 1: Rollup build
+// Step 0: Validate URL single-source-of-truth consistency
 // ════════════════════════════════════════════════════════════════
+const urlConfigPath = p('src', 'cpm-url.config.js');
+const urlConfigSrc = fs.readFileSync(urlConfigPath, 'utf-8');
+const urlMatch = urlConfigSrc.match(/CPM_BASE_URL\s*=\s*['"]([^'"]+)['"]/);
+if (!urlMatch) fail('Cannot parse CPM_BASE_URL from src/cpm-url.config.js');
+const configBaseUrl = urlMatch[1];
+
+const headerPath = p('src', 'plugin-header.js');
+const headerSrc = fs.readFileSync(headerPath, 'utf-8');
+const headerUrlMatch = headerSrc.match(/@update-url\s+(\S+)/);
+if (!headerUrlMatch) fail('Cannot find @update-url in src/plugin-header.js');
+const headerUpdateUrl = headerUrlMatch[1];
+const expectedUpdateUrl = `${configBaseUrl}/api/main-plugin`;
+if (headerUpdateUrl !== expectedUpdateUrl) {
+    log('url', `⚠️  plugin-header.js @update-url will be overwritten by rollup build (${headerUpdateUrl} → ${expectedUpdateUrl})`);
+}
+log('url', `✓ CPM_BASE_URL = ${configBaseUrl} (source: src/cpm-url.config.js)`);
+
+// ════════════════════════════════════════════════════════════════
+// Step 1: Build Tailwind CSS + Rollup bundle
+// ════════════════════════════════════════════════════════════════
+log('build', 'Generating Tailwind CSS...');
+try {
+    execSync('node scripts/build-tailwind.cjs', { cwd: ROOT, stdio: 'pipe' });
+    log('build', '✓ Tailwind CSS generated');
+} catch (e) {
+    fail(`Tailwind CSS build failed:\n${e.stderr?.toString() || e.message}`);
+}
+
 log('build', 'Running rollup build...');
 try {
     execSync('npx rollup -c rollup.config.mjs', { cwd: ROOT, stdio: 'pipe' });

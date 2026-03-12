@@ -3,7 +3,7 @@
  * Covers: JSON credential parsing edge cases, withRotation drain/retry,
  * withJsonRotation, _buildJsonCredentialError, Windows path detection.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { KeyPool } from '../src/lib/key-pool.js';
 
 describe('KeyPool — deep coverage', () => {

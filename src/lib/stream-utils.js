@@ -1,3 +1,4 @@
+// @ts-check
 /**
  * stream-utils.js — Stream utility functions.
  * Provides stream collection and bridge capability detection.
@@ -27,6 +28,7 @@ export async function collectStream(stream) {
 }
 
 /** Cached result of stream bridge capability detection. */
+/** @type {boolean | null} */
 let _streamBridgeCapable = null;
 
 /**

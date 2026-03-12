@@ -15,6 +15,10 @@ const {
     mockEnsureCopilotApiToken,
     mockSubPluginManager,
     mockKeyPool,
+    mockSafeUUID,
+    mockNormalizeTokenUsage,
+    mockThoughtSignatureCache,
+    mockNeedsCopilotResponsesAPI,
 } = vi.hoisted(() => ({
     mockRisu: { setArgument: vi.fn() },
     mockState: {
@@ -46,6 +50,10 @@ const {
         pickJson: vi.fn(() => ({ id: 1 })),
         withJsonRotation: vi.fn(async () => 'json-rotated'),
     },
+    mockSafeUUID: vi.fn(() => 'uuid-1'),
+    mockNormalizeTokenUsage: vi.fn((v) => ({ normalized: v })),
+    mockThoughtSignatureCache: { clear: vi.fn(), get: vi.fn(() => 'sig') },
+    mockNeedsCopilotResponsesAPI: vi.fn(() => true),
 }));
 
 vi.mock('../src/lib/shared-state.js', () => ({
@@ -60,7 +68,7 @@ vi.mock('../src/lib/shared-state.js', () => ({
     _pluginCleanupHooks: mockPluginCleanupHooks,
 }));
 
-vi.mock('../src/lib/helpers.js', () => ({ safeUUID: vi.fn(() => 'uuid-1') }));
+vi.mock('../src/lib/helpers.js', () => ({ safeUUID: (...a) => mockSafeUUID(...a) }));
 vi.mock('../src/lib/format-openai.js', () => ({ formatToOpenAI: vi.fn(() => ({ messages: [] })) }));
 vi.mock('../src/lib/format-anthropic.js', () => ({ formatToAnthropic: vi.fn(() => ({ messages: [], system: '' })) }));
 vi.mock('../src/lib/format-gemini.js', () => ({
@@ -70,7 +78,7 @@ vi.mock('../src/lib/format-gemini.js', () => ({
     validateGeminiParams: vi.fn(() => true),
     isExperimentalGeminiModel: vi.fn(() => false),
     cleanExperimentalModelParams: vi.fn((v) => v),
-    ThoughtSignatureCache: { clear: vi.fn() },
+    ThoughtSignatureCache: mockThoughtSignatureCache,
 }));
 vi.mock('../src/lib/stream-builders.js', () => ({
     createSSEStream: vi.fn(),
@@ -90,8 +98,8 @@ vi.mock('../src/lib/stream-utils.js', () => ({
     collectStream: vi.fn(async () => 'stream'),
     checkStreamCapability: (...a) => mockCheckStreamCapability(...a),
 }));
-vi.mock('../src/lib/token-usage.js', () => ({ _normalizeTokenUsage: vi.fn((v) => v) }));
-vi.mock('../src/lib/model-helpers.js', () => ({ needsCopilotResponsesAPI: vi.fn(() => true) }));
+vi.mock('../src/lib/token-usage.js', () => ({ _normalizeTokenUsage: (...a) => mockNormalizeTokenUsage(...a) }));
+vi.mock('../src/lib/model-helpers.js', () => ({ needsCopilotResponsesAPI: (...a) => mockNeedsCopilotResponsesAPI(...a) }));
 vi.mock('../src/lib/key-pool.js', () => ({ KeyPool: mockKeyPool }));
 vi.mock('../src/lib/aws-signer.js', () => ({ AwsV4Signer: { sign: vi.fn() } }));
 vi.mock('../src/lib/smart-fetch.js', () => ({ smartNativeFetch: (...a) => mockSmartNativeFetch(...a) }));
@@ -159,6 +167,49 @@ describe('setupCupcakeAPI', () => {
         });
     });
 
+    it('registerProvider deduplicates models, tabs and fetchers on re-registration', () => {
+        setupCupcakeAPI();
+        const fetcher1 = vi.fn();
+        const fetcher2 = vi.fn();
+        const tab1 = { id: 'tab-1', providerName: 'Alpha' };
+        const tab2 = { id: 'tab-2', providerName: 'Alpha' };
+        const dynFetch1 = vi.fn();
+        const dynFetch2 = vi.fn();
+
+        // First registration
+        window.CupcakePM.registerProvider({
+            name: 'Alpha',
+            models: [{ id: 'm1', name: 'M1' }],
+            fetcher: fetcher1,
+            settingsTab: tab1,
+            fetchDynamicModels: dynFetch1,
+        });
+
+        // Second registration (same name — should replace, not accumulate)
+        window.CupcakePM.registerProvider({
+            name: 'Alpha',
+            models: [{ id: 'm2', name: 'M2' }, { id: 'm3', name: 'M3' }],
+            fetcher: fetcher2,
+            settingsTab: tab2,
+            fetchDynamicModels: dynFetch2,
+        });
+
+        // Fetcher replaced
+        expect(mockCustomFetchers.Alpha).toBe(fetcher2);
+        // Models: old ones removed, only new ones present
+        const alphaModels = mockState.ALL_DEFINED_MODELS.filter(m => m.provider === 'Alpha');
+        expect(alphaModels).toHaveLength(2);
+        expect(alphaModels.map(m => m.id)).toEqual(['m2', 'm3']);
+        // Tabs: no duplicates
+        const alphaTabs = mockRegisteredProviderTabs.filter(t => t.providerName === 'Alpha');
+        expect(alphaTabs).toHaveLength(1);
+        expect(alphaTabs[0]).toBe(tab2);
+        // Dynamic fetchers: no duplicates
+        const alphaFetchers = mockPendingDynamicFetchers.filter(f => f.name === 'Alpha');
+        expect(alphaFetchers).toHaveLength(1);
+        expect(alphaFetchers[0].fetchDynamicModels).toBe(dynFetch2);
+    });
+
     it('registerCleanup warns outside plugin execution context', () => {
         setupCupcakeAPI();
         const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -178,6 +229,15 @@ describe('setupCupcakeAPI', () => {
         window.CupcakePM.registerCleanup(cleanup);
 
         expect(mockPluginCleanupHooks['plugin-1']).toEqual([cleanup]);
+    });
+
+    it('registerCleanup ignores non-function values', () => {
+        setupCupcakeAPI();
+        mockState._currentExecutingPluginId = 'plugin-1';
+
+        window.CupcakePM.registerCleanup('not-a-function');
+
+        expect(mockPluginCleanupHooks).toEqual({});
     });
 
     it('addCustomModel creates a new custom model and persists it', () => {
@@ -247,6 +307,32 @@ describe('setupCupcakeAPI', () => {
         expect(window.CupcakePM.ensureCopilotApiToken()).toBe('token');
         expect(mockSubPluginManager.hotReload).toHaveBeenCalledWith('plugin-1');
         expect(mockSubPluginManager.hotReloadAll).toHaveBeenCalled();
+    });
+
+    it('exposes passthrough helpers and advanced wrappers', async () => {
+        setupCupcakeAPI();
+        mockSafeGetArg.mockResolvedValue('value-from-arg');
+        mockSafeGetBoolArg.mockResolvedValue(true);
+
+        await expect(window.CupcakePM.safeGetArg('foo')).resolves.toBe('value-from-arg');
+        await expect(window.CupcakePM.safeGetBoolArg('flag', false)).resolves.toBe(true);
+        expect(window.CupcakePM.safeUUID()).toBe('uuid-1');
+        expect(window.CupcakePM.ThoughtSignatureCache).toBe(mockThoughtSignatureCache);
+        expect(window.CupcakePM._needsCopilotResponsesAPI('gpt-5')).toBe(true);
+        await expect(window.CupcakePM.checkStreamCapability()).resolves.toBe(true);
+        expect(window.CupcakePM.drainKey('arg', 'bad')).toBe(true);
+        expect(window.CupcakePM.resetKeyPool('arg')).toBeUndefined();
+        await expect(window.CupcakePM.withKeyRotation('arg', async () => 'ok', { retries: 2 })).resolves.toBe('rotated');
+        await expect(window.CupcakePM.withJsonKeyRotation('json', async () => 'ok', { retries: 1 })).resolves.toBe('json-rotated');
+        expect(window.CupcakePM._normalizeTokenUsage({ total: 1 })).toEqual({ normalized: { total: 1 } });
+
+        expect(mockNeedsCopilotResponsesAPI).toHaveBeenCalledWith('gpt-5');
+        expect(mockCheckStreamCapability).toHaveBeenCalledTimes(1);
+        expect(mockKeyPool.drain).toHaveBeenCalledWith('arg', 'bad');
+        expect(mockKeyPool.reset).toHaveBeenCalledWith('arg');
+        expect(mockKeyPool.withRotation).toHaveBeenCalledWith('arg', expect.any(Function), { retries: 2 });
+        expect(mockKeyPool.withJsonRotation).toHaveBeenCalledWith('json', expect.any(Function), { retries: 1 });
+        expect(mockNormalizeTokenUsage).toHaveBeenCalledWith({ total: 1 });
     });
 
     it('exposes vertexTokenCache through getter/setter', () => {

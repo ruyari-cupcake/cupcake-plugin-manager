@@ -1,3 +1,4 @@
+// @ts-check
 /**
  * cupcake-api.js — window.CupcakePM global API surface.
  * Public API that sub-plugins use to register providers and access CPM internals.
@@ -46,7 +47,23 @@ export function setupCupcakeAPI() {
     cupcakeWindow.CupcakePM = {
         customFetchers,
         registeredProviderTabs,
+        /** @param {{ name: string, models: any[], fetcher: any, settingsTab: any, fetchDynamicModels: any }} _opts */
         registerProvider({ name, models, fetcher, settingsTab, fetchDynamicModels }) {
+            // ── Duplicate guard: remove previous registration for same provider name ──
+            // customFetchers[name] is object-keyed so natural overwrite is fine.
+            // Models, tabs, and dynamic fetchers are arrays — deduplicate.
+            state.ALL_DEFINED_MODELS = state.ALL_DEFINED_MODELS.filter(
+                (/** @type {any} */ m) => m.provider !== name
+            );
+            const existingTabIdx = registeredProviderTabs.findIndex(
+                (/** @type {any} */ t) => t && t.providerName === name
+            );
+            if (existingTabIdx !== -1) registeredProviderTabs.splice(existingTabIdx, 1);
+            const existingFetcherIdx = pendingDynamicFetchers.findIndex(
+                (/** @type {any} */ f) => f.name === name
+            );
+            if (existingFetcherIdx !== -1) pendingDynamicFetchers.splice(existingFetcherIdx, 1);
+
             if (state._currentExecutingPluginId) {
                 if (!_pluginRegistrations[state._currentExecutingPluginId]) {
                     _pluginRegistrations[state._currentExecutingPluginId] = { providerNames: [], tabObjects: [], fetcherEntries: [] };
@@ -98,23 +115,23 @@ export function setupCupcakeAPI() {
         },
         safeGetArg,
         safeGetBoolArg,
-        setArg: (k, v) => Risu.setArgument(k, String(v)),
+        setArg: (/** @type {string} */ k, /** @type {any} */ v) => Risu.setArgument(k, String(v)),
         // Key Rotation API
-        pickKey: (argName) => KeyPool.pick(argName),
-        drainKey: (argName, failedKey) => KeyPool.drain(argName, failedKey),
-        keyPoolRemaining: (argName) => KeyPool.remaining(argName),
-        resetKeyPool: (argName) => KeyPool.reset(argName),
-        withKeyRotation: (argName, fetchFn, opts) => KeyPool.withRotation(argName, fetchFn, opts),
+        pickKey: (/** @type {string} */ argName) => KeyPool.pick(argName),
+        drainKey: (/** @type {string} */ argName, /** @type {string} */ failedKey) => KeyPool.drain(argName, failedKey),
+        keyPoolRemaining: (/** @type {string} */ argName) => KeyPool.remaining(argName),
+        resetKeyPool: (/** @type {string} */ argName) => KeyPool.reset(argName),
+        withKeyRotation: (/** @type {string} */ argName, /** @type {(key: string) => Promise<any>} */ fetchFn, /** @type {any} */ opts) => KeyPool.withRotation(argName, fetchFn, opts),
         // JSON Credential Rotation API
-        pickJsonKey: (argName) => KeyPool.pickJson(argName),
-        withJsonKeyRotation: (argName, fetchFn, opts) => KeyPool.withJsonRotation(argName, fetchFn, opts),
+        pickJsonKey: (/** @type {string} */ argName) => KeyPool.pickJson(argName),
+        withJsonKeyRotation: (/** @type {string} */ argName, /** @type {(key: string) => Promise<any>} */ fetchFn, /** @type {any} */ opts) => KeyPool.withJsonRotation(argName, fetchFn, opts),
         get vertexTokenCache() { return state.vertexTokenCache; },
         set vertexTokenCache(v) { state.vertexTokenCache = v; },
         AwsV4Signer,
         checkStreamCapability,
-        hotReload: (pluginId) => SubPluginManager.hotReload(pluginId),
+        hotReload: (/** @type {string} */ pluginId) => SubPluginManager.hotReload(pluginId),
         hotReloadAll: () => SubPluginManager.hotReloadAll(),
-        registerCleanup(cleanupFn) {
+        registerCleanup(/** @type {Function} */ cleanupFn) {
             if (typeof cleanupFn !== 'function') return;
             const pluginId = state._currentExecutingPluginId;
             if (!pluginId) {
@@ -125,16 +142,17 @@ export function setupCupcakeAPI() {
             _pluginCleanupHooks[pluginId].push(cleanupFn);
             console.log(`[CupcakePM] Cleanup hook registered for plugin ${pluginId}`);
         },
-        addCustomModel(modelDef, tag = '') {
+        addCustomModel(/** @type {Record<string, any>} */ modelDef, tag = '') {
             try {
                 let existingIdx = -1;
-                if (tag) existingIdx = state.CUSTOM_MODELS_CACHE.findIndex(m => m._tag === tag);
+                if (tag) existingIdx = state.CUSTOM_MODELS_CACHE.findIndex(m => /** @type {Record<string, any>} */ (m)._tag === tag);
                 if (existingIdx !== -1) {
                     state.CUSTOM_MODELS_CACHE[existingIdx] = { ...state.CUSTOM_MODELS_CACHE[existingIdx], ...modelDef, _tag: tag };
                     Risu.setArgument('cpm_custom_models', JSON.stringify(state.CUSTOM_MODELS_CACHE));
-                    return { success: true, created: false, uniqueId: state.CUSTOM_MODELS_CACHE[existingIdx].uniqueId };
+                    return { success: true, created: false, uniqueId: /** @type {Record<string, any>} */ (state.CUSTOM_MODELS_CACHE[existingIdx]).uniqueId };
                 } else {
                     const uniqueId = 'custom_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
+                    /** @type {Record<string, any>} */
                     const entry = { ...modelDef, uniqueId, _tag: tag || undefined };
                     state.CUSTOM_MODELS_CACHE.push(entry);
                     state.ALL_DEFINED_MODELS.push({ uniqueId, id: entry.model, name: entry.name || uniqueId, provider: 'Custom' });
@@ -142,11 +160,11 @@ export function setupCupcakeAPI() {
                     return { success: true, created: true, uniqueId };
                 }
             } catch (e) {
-                return { success: false, created: false, uniqueId: '', error: e.message };
+                return { success: false, created: false, uniqueId: '', error: /** @type {Error} */ (e).message };
             }
         },
-        smartFetch: async (url, options = {}) => smartNativeFetch(url, options),
-        smartNativeFetch: async (url, options = {}) => smartNativeFetch(url, options),
+        smartFetch: async (/** @type {string} */ url, /** @type {Record<string, any>} */ options = {}) => smartNativeFetch(url, options),
+        smartNativeFetch: async (/** @type {string} */ url, /** @type {Record<string, any>} */ options = {}) => smartNativeFetch(url, options),
         ensureCopilotApiToken: () => ensureCopilotApiToken(),
         _normalizeTokenUsage,
     };

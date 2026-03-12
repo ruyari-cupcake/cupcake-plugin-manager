@@ -4,7 +4,7 @@
  * endpoints.api preservation, window globals, all uncovered branches.
  * @vitest-environment jsdom
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import {
     ensureCopilotApiToken,
     setCopilotGetArgFn,
@@ -24,7 +24,7 @@ describe('Copilot Token — deep branch coverage', () => {
             if (key === 'tools_githubCopilotToken') return 'ghu_valid_oauth_token';
             return '';
         });
-        setCopilotFetchFn(async (url, opts) => ({
+        setCopilotFetchFn(async (_url, _opts) => ({
             ok: true,
             json: async () => ({
                 data: [
@@ -63,7 +63,7 @@ describe('Copilot Token — deep branch coverage', () => {
     });
 
     it('handles response without expires_at (defaults to 30 min)', async () => {
-        const now = Date.now();
+        const _now = Date.now();
         setCopilotGetArgFn(async (key) => {
             if (key === 'tools_githubCopilotToken') return 'ghu_test';
             return '';

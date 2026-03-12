@@ -177,6 +177,14 @@ describe('SubPluginManager — executeOne', () => {
         await SubPluginManager.executeOne(undefined);
         expect(mockExecuteViaScriptTag).not.toHaveBeenCalled();
     });
+
+    it('swallows executeOne script errors and resets current plugin id', async () => {
+        mockExecuteViaScriptTag.mockRejectedValueOnce(new Error('hot-load failed'));
+
+        await expect(SubPluginManager.executeOne({ id: 'sp_1', name: 'Broken', code: 'boom', enabled: true })).resolves.toBeUndefined();
+
+        expect(mockState._currentExecutingPluginId).toBeNull();
+    });
 });
 
 // ════════════════════════════════════════════════════════════════
@@ -367,6 +375,29 @@ describe('SubPluginManager — hotReloadAll', () => {
         expect(fetchDyn).toHaveBeenCalled();
         expect(mockState.ALL_DEFINED_MODELS).toHaveLength(1);
         expect(mockState.ALL_DEFINED_MODELS[0].name).toBe('Dynamic');
+    });
+
+    it('skips hotReloadAll dynamic fetchers when disabled', async () => {
+        const fetchDyn = vi.fn().mockResolvedValue([{ id: 'dyn-1', name: 'Dynamic', provider: 'DynProvider' }]);
+        mockPendingDynamicFetchers.push({ name: 'DynProvider', fetchDynamicModels: fetchDyn });
+        mockIsDynamicFetchEnabled.mockResolvedValue(false);
+
+        await SubPluginManager.hotReloadAll();
+
+        expect(fetchDyn).not.toHaveBeenCalled();
+    });
+
+    it('continues hotReloadAll when dynamic fetch throws', async () => {
+        const fetchDyn = vi.fn().mockRejectedValue(new Error('dynamic boom'));
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        mockPendingDynamicFetchers.push({ name: 'DynProvider', fetchDynamicModels: fetchDyn });
+        mockIsDynamicFetchEnabled.mockResolvedValue(true);
+
+        await expect(SubPluginManager.hotReloadAll()).resolves.toBeUndefined();
+
+        expect(fetchDyn).toHaveBeenCalled();
+        expect(warnSpy).toHaveBeenCalled();
+        warnSpy.mockRestore();
     });
 });
 

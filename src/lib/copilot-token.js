@@ -1,3 +1,4 @@
+// @ts-check
 /**
  * copilot-token.js — GitHub Copilot API token management.
  * Handles OAuth → API token exchange with caching and single-flight dedup.
@@ -5,11 +6,11 @@
  */
 
 let _copilotTokenCache = { token: '', expiry: 0 };
-let _copilotTokenPromise = null;
+let _copilotTokenPromise = /** @type {Promise<string> | null} */ (null);
 
 /** Injected dependencies */
-let _getArgFn = null;
-let _fetchFn = null;
+let _getArgFn = /** @type {Function | null} */ (null);
+let _fetchFn = /** @type {Function | null} */ (null);
 
 /**
  * Set the safeGetArg dependency for reading stored arguments.
@@ -113,7 +114,7 @@ export async function ensureCopilotApiToken() {
     try {
         return await _copilotTokenPromise;
     } catch (e) {
-        console.error('[Cupcake PM] Copilot token exchange error:', e.message);
+        console.error('[Cupcake PM] Copilot token exchange error:', /** @type {Error} */ (e).message);
         return '';
     } finally {
         _copilotTokenPromise = null;

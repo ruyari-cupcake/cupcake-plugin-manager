@@ -76,34 +76,8 @@ vi.mock('../src/lib/stream-utils.js', () => ({
 
 import { handleRequest, fetchByProviderId, _toFiniteFloat, _toFiniteInt } from '../src/lib/router.js';
 
-describe('_toFiniteFloat / _toFiniteInt edge cases', () => {
-    it('returns undefined for NaN input', () => {
-        expect(_toFiniteFloat('not-a-number')).toBeUndefined();
-        expect(_toFiniteInt('not-a-number')).toBeUndefined();
-    });
-
-    it('returns undefined for Infinity', () => {
-        expect(_toFiniteFloat('Infinity')).toBeUndefined();
-        expect(_toFiniteInt('Infinity')).toBeUndefined();
-    });
-
-    it('returns undefined for empty string', () => {
-        expect(_toFiniteFloat('')).toBeUndefined();
-        expect(_toFiniteInt('')).toBeUndefined();
-    });
-
-    it('parses valid numbers correctly', () => {
-        expect(_toFiniteFloat('1.5')).toBe(1.5);
-        expect(_toFiniteInt('42')).toBe(42);
-        expect(_toFiniteFloat('0')).toBe(0);
-        expect(_toFiniteInt('0')).toBe(0);
-    });
-
-    it('parses negative numbers', () => {
-        expect(_toFiniteFloat('-0.5')).toBe(-0.5);
-        expect(_toFiniteInt('-10')).toBe(-10);
-    });
-});
+// NOTE: _toFiniteFloat/_toFiniteInt pure-function tests are in router.test.js.
+// This file focuses on handleRequest/fetchByProviderId integration behavior.
 
 describe('fetchByProviderId — deep coverage', () => {
     beforeEach(() => {
@@ -165,6 +139,43 @@ describe('fetchByProviderId — deep coverage', () => {
         expect(result.content).toContain('temp=0.7');
         expect(result.content).toContain('max=1000');
         expect(result.content).toContain('topP=0.9');
+    });
+
+    it('does not overwrite request args when fallback values exist but explicit values are provided', async () => {
+        h.safeGetArg.mockImplementation(async (key, def = '') => {
+            const vals = {
+                cpm_fallback_temp: '0.7',
+                cpm_fallback_max_tokens: '1000',
+                cpm_fallback_top_p: '0.9',
+                cpm_fallback_freq_pen: '0.1',
+                cpm_fallback_pres_pen: '0.2',
+            };
+            return key in vals ? vals[key] : def;
+        });
+        const fetcher = vi.fn(async (_modelDef, _msgs, temp, maxTokens, reqArgs) => ({
+            success: true,
+            content: JSON.stringify({ temp, maxTokens, reqArgs }),
+        }));
+        h.customFetchers['Explicit'] = fetcher;
+
+        await fetchByProviderId(
+            { provider: 'Explicit', name: 'KeepArgs' },
+            {
+                prompt_chat: [],
+                temperature: 0.2,
+                max_tokens: 123,
+                top_p: 0.4,
+                frequency_penalty: 0.5,
+                presence_penalty: 0.6,
+            },
+        );
+
+        const [, , temp, maxTokens, reqArgs] = fetcher.mock.calls[0];
+        expect(temp).toBe(0.2);
+        expect(maxTokens).toBe(123);
+        expect(reqArgs.top_p).toBe(0.4);
+        expect(reqArgs.frequency_penalty).toBe(0.5);
+        expect(reqArgs.presence_penalty).toBe(0.6);
     });
 
     it('catches exceptions from fetcher and returns error', async () => {
@@ -264,7 +275,7 @@ describe('handleRequest — deep coverage', () => {
         }));
         h.customFetchers['Trans'] = fetcher;
 
-        const result = await handleRequest(
+        const _result = await handleRequest(
             { prompt_chat: [] },
             { provider: 'Trans', name: 'T' }
         );
@@ -280,7 +291,7 @@ describe('handleRequest — deep coverage', () => {
 
     it('does NOT apply slot overrides when slot detected but NOT heuristically confirmed', async () => {
         h.inferSlot.mockResolvedValue({ slot: 'translation', heuristicConfirmed: false });
-        const fetcher = vi.fn(async (modelDef, msgs, temp, maxTokens, args) => ({
+        const fetcher = vi.fn(async (_modelDef, _msgs, _temp, _maxTokens, _args) => ({
             success: true, content: 'ok',
         }));
         h.customFetchers['Trans'] = fetcher;
@@ -367,6 +378,39 @@ describe('handleRequest — deep coverage', () => {
         h.customFetchers['Tok'] = async () => ({ success: true, content: 'ok' });
 
         await handleRequest({}, { provider: 'Tok', name: 'T' });
+        expect(h.showToast).toHaveBeenCalled();
+    });
+
+    it('records custom success and error status codes in request logs', async () => {
+        h.customFetchers['StatusOk'] = async () => ({ success: true, content: 'ok', _status: 206 });
+        h.customFetchers['StatusFail'] = async () => ({ success: false, content: 'bad', _status: 429 });
+
+        await handleRequest({}, { provider: 'StatusOk', name: 'Ok' });
+        await handleRequest({}, { provider: 'StatusFail', name: 'Fail' });
+
+        expect(h.updateReq).toHaveBeenCalledWith('req-1', expect.objectContaining({ status: 206 }));
+        expect(h.updateReq).toHaveBeenCalledWith('req-1', expect.objectContaining({ status: 429 }));
+    });
+
+    it('shows token usage toast after collected streaming fallback when enabled', async () => {
+        h.safeGetBoolArg.mockImplementation(async (key) => {
+            if (key === 'cpm_streaming_enabled') return false;
+            if (key === 'cpm_show_token_usage') return true;
+            return false;
+        });
+        h.takeTokenUsage.mockReturnValueOnce(null).mockReturnValueOnce({ prompt: 1, completion: 2 });
+        h.collectStream.mockResolvedValue('joined-stream');
+        const readableStream = new ReadableStream({
+            start(controller) {
+                controller.enqueue('chunk');
+                controller.close();
+            },
+        });
+        h.customFetchers['StreamToast'] = async () => ({ success: true, content: readableStream });
+
+        const result = await handleRequest({}, { provider: 'StreamToast', name: 'StreamToast' });
+
+        expect(result.content).toBe('joined-stream');
         expect(h.showToast).toHaveBeenCalled();
     });
 

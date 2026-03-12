@@ -7,7 +7,8 @@
 import { _normalizeTokenUsage, _setTokenUsage } from './token-usage.js';
 import { ThoughtSignatureCache } from './format-gemini.js';
 
-/** Module-level reference to the API request logger. Set via setApiRequestLogger(). */
+/** Module-level reference to the API request logger. Set via setApiRequestLogger().
+ * @type {Function|null} */
 let _logFn = null;
 
 /**
@@ -18,6 +19,7 @@ export function setApiRequestLogger(fn) {
     _logFn = typeof fn === 'function' ? fn : null;
 }
 
+/** @param {string|undefined} requestId @param {any} updates */
 function _log(requestId, updates) {
     if (_logFn && requestId) _logFn(requestId, updates);
 }
@@ -34,7 +36,7 @@ function _log(requestId, updates) {
  * @returns {ReadableStream<string>}
  */
 export function createSSEStream(response, lineParser, abortSignal, onComplete, _logRequestId) {
-    const reader = response.body.getReader();
+    const reader = /** @type {ReadableStream<Uint8Array>} */ (response.body).getReader();
     const decoder = new TextDecoder();
     let buffer = '';
     let _accumulatedContent = '';
@@ -73,9 +75,9 @@ export function createSSEStream(response, lineParser, abortSignal, onComplete, _
                     }
                 }
             } catch (e) {
-                if (e.name !== 'AbortError') {
+                if (/** @type {any} */ (e).name !== 'AbortError') {
                     if (typeof onComplete === 'function') try { const _f = onComplete(); if (_f) controller.enqueue(_f); } catch (_) { /* */ }
-                    _log(_logRequestId, { response: _accumulatedContent + `\n[Stream Error: ${e.message}]` });
+                    _log(_logRequestId, { response: _accumulatedContent + `\n[Stream Error: ${/** @type {any} */ (e).message}]` });
                     controller.error(e);
                 } else {
                     if (typeof onComplete === 'function') try { const _f = onComplete(); if (_f) controller.enqueue(_f); } catch (_) { /* */ }
@@ -103,8 +105,10 @@ export function createSSEStream(response, lineParser, abortSignal, onComplete, _
  */
 export function createOpenAISSEStream(response, abortSignal, _logRequestId) {
     let inReasoning = false;
+    /** @type {any} */
     let _streamUsage = null;
 
+    /** @param {string} line */
     function parser(line) {
         if (!line.startsWith('data:')) return null;
         const jsonStr = line.slice(5).trim();
@@ -129,7 +133,7 @@ export function createOpenAISSEStream(response, abortSignal, _logRequestId) {
     }
 
     function onComplete() {
-        if (_streamUsage) _setTokenUsage(_logRequestId, _streamUsage, true);
+        if (_streamUsage) _setTokenUsage(/** @type {string} */ (_logRequestId), _streamUsage, true);
         if (inReasoning) { inReasoning = false; return '\n</Thoughts>\n'; }
         return null;
     }
@@ -149,8 +153,10 @@ export function createOpenAISSEStream(response, abortSignal, _logRequestId) {
  */
 export function createResponsesAPISSEStream(response, abortSignal, _logRequestId) {
     let inReasoning = false;
+    /** @type {any} */
     let _streamUsage = null;
 
+    /** @param {string} line */
     function parser(line) {
         if (!line.startsWith('data:')) return null;
         const jsonStr = line.slice(5).trim();
@@ -177,7 +183,7 @@ export function createResponsesAPISSEStream(response, abortSignal, _logRequestId
     }
 
     function onComplete() {
-        if (_streamUsage) _setTokenUsage(_logRequestId, _streamUsage, true);
+        if (_streamUsage) _setTokenUsage(/** @type {string} */ (_logRequestId), _streamUsage, true);
         if (inReasoning) { inReasoning = false; return '\n</Thoughts>\n'; }
         return null;
     }
@@ -196,7 +202,7 @@ export function createResponsesAPISSEStream(response, abortSignal, _logRequestId
  * @returns {ReadableStream<string>}
  */
 export function createAnthropicSSEStream(response, abortSignal, _logRequestId) {
-    const reader = response.body.getReader();
+    const reader = /** @type {ReadableStream<Uint8Array>} */ (response.body).getReader();
     const decoder = new TextDecoder();
     let buffer = '';
     let currentEvent = '';
@@ -217,10 +223,10 @@ export function createAnthropicSSEStream(response, abortSignal, _logRequestId) {
                             thinking = false;
                         }
                         if (_streamUsage.input_tokens > 0 || _streamUsage.output_tokens > 0) {
-                            _setTokenUsage(_logRequestId, _normalizeTokenUsage(_streamUsage, 'anthropic', {
+                            _setTokenUsage(/** @type {string} */ (_logRequestId), /** @type {any} */ (_normalizeTokenUsage(_streamUsage, 'anthropic', {
                                 anthropicHasThinking: hasThinking,
                                 anthropicVisibleText: _visibleText,
-                            }), true);
+                            })), true);
                         }
                         reader.cancel();
                         _log(_logRequestId, { response: _accumulatedContent || '(aborted)' });
@@ -236,10 +242,10 @@ export function createAnthropicSSEStream(response, abortSignal, _logRequestId) {
                             thinking = false;
                         }
                         if (_streamUsage.input_tokens > 0 || _streamUsage.output_tokens > 0) {
-                            _setTokenUsage(_logRequestId, _normalizeTokenUsage(_streamUsage, 'anthropic', {
+                            _setTokenUsage(/** @type {string} */ (_logRequestId), /** @type {any} */ (_normalizeTokenUsage(_streamUsage, 'anthropic', {
                                 anthropicHasThinking: hasThinking,
                                 anthropicVisibleText: _visibleText,
-                            }), true);
+                            })), true);
                         }
                         _log(_logRequestId, { response: _accumulatedContent || '(empty stream)' });
                         if (_accumulatedContent) console.log('[CupcakePM] 📥 Streamed Response Body (Anthropic):', _accumulatedContent);
@@ -314,13 +320,13 @@ export function createAnthropicSSEStream(response, abortSignal, _logRequestId) {
                     thinking = false;
                 }
                 if (_streamUsage.input_tokens > 0 || _streamUsage.output_tokens > 0) {
-                    _setTokenUsage(_logRequestId, _normalizeTokenUsage(_streamUsage, 'anthropic', {
+                    _setTokenUsage(/** @type {string} */ (_logRequestId), /** @type {any} */ (_normalizeTokenUsage(_streamUsage, 'anthropic', {
                         anthropicHasThinking: hasThinking,
                         anthropicVisibleText: _visibleText,
-                    }), true);
+                    })), true);
                 }
-                if (e.name !== 'AbortError') {
-                    _log(_logRequestId, { response: _accumulatedContent + `\n[Stream Error: ${e.message}]` });
+                if (/** @type {any} */ (e).name !== 'AbortError') {
+                    _log(_logRequestId, { response: _accumulatedContent + `\n[Stream Error: ${/** @type {any} */ (e).message}]` });
                     controller.error(e);
                 } else {
                     _log(_logRequestId, { response: _accumulatedContent || '(aborted)' });
@@ -331,10 +337,10 @@ export function createAnthropicSSEStream(response, abortSignal, _logRequestId) {
         cancel() {
             _log(_logRequestId, { response: _accumulatedContent || '(cancelled)' });
             if (_streamUsage.input_tokens > 0 || _streamUsage.output_tokens > 0) {
-                _setTokenUsage(_logRequestId, _normalizeTokenUsage(_streamUsage, 'anthropic', {
+                _setTokenUsage(/** @type {string} */ (_logRequestId), /** @type {any} */ (_normalizeTokenUsage(_streamUsage, 'anthropic', {
                     anthropicHasThinking: hasThinking,
                     anthropicVisibleText: _visibleText,
-                }), true);
+                })), true);
             }
             reader.cancel();
         },
@@ -345,7 +351,7 @@ export function createAnthropicSSEStream(response, abortSignal, _logRequestId) {
 
 /**
  * onComplete callback for Gemini streams — saves thought_signature from config.
- * @param {Object} config - Mutable config object populated during streaming
+ * @param {Record<string, any>} config - Mutable config object populated during streaming
  * @param {string} [_requestId]
  * @returns {string|undefined} Final chunk to enqueue (e.g. closing </Thoughts>)
  */
@@ -361,7 +367,7 @@ export function saveThoughtSignatureFromStream(config, _requestId) {
     }
     if (config._streamUsageMetadata) {
         const _usageReqId = _requestId || config._tokenUsageReqId;
-        _setTokenUsage(_usageReqId, _normalizeTokenUsage(config._streamUsageMetadata, 'gemini'), true);
+        _setTokenUsage(_usageReqId, /** @type {any} */ (_normalizeTokenUsage(config._streamUsageMetadata, 'gemini')), true);
     }
     return finalChunk || undefined;
 }

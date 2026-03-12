@@ -31,10 +31,7 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      - name: Test
-        run: npm test
-
-      - name: Coverage (threshold gate)
+      - name: Test + Coverage (threshold gate)
         run: npm run test:coverage
 
       - name: Build (Rollup IIFE)
@@ -44,3 +41,6 @@ jobs:
         run: |
           test -f dist/provider-manager.js
           echo "✅ dist/provider-manager.js generated ($(wc -c < dist/provider-manager.js) bytes)"
+
+      - name: Release pipeline dry-run
+        run: node scripts/release.cjs --dry-run --skip-test

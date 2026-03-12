@@ -1,3 +1,4 @@
+// @ts-check
 /**
  * format-anthropic.js — Format messages for Anthropic Claude API.
  * Handles system prompt extraction, consecutive message merging, multimodal content,
@@ -9,9 +10,9 @@ import { hasNonEmptyMessageContent, parseBase64DataUri, extractImageUrlFromPart 
 /**
  * Merge content parts into the previous message if same role, otherwise push a new entry.
  * Eliminates the repeated consecutive-merge pattern throughout formatToAnthropic.
- * @param {Array} formattedMsgs - The formatted message array (mutated in place)
+ * @param {Array<any>} formattedMsgs - The formatted message array (mutated in place)
  * @param {string} role - 'user' | 'assistant'
- * @param {Array} contentParts - Array of Anthropic content blocks to merge/push
+ * @param {Array<any>} contentParts - Array of Anthropic content blocks to merge/push
  */
 export function _mergeOrPush(formattedMsgs, role, contentParts) {
     if (formattedMsgs.length > 0 && formattedMsgs[formattedMsgs.length - 1].role === role) {
@@ -28,13 +29,14 @@ export function _mergeOrPush(formattedMsgs, role, contentParts) {
 
 /**
  * Format messages for Anthropic Messages API.
- * @param {Array} messages - Raw message array
+ * @param {Array<any>} messages - Raw message array
  * @param {Object} config - Formatting options
  * @param {boolean} [config.caching] - Enable cache_control breakpoints
  * @param {boolean} [config.claude1HourCaching] - Use 1h TTL for cache_control
- * @returns {{ messages: Array, system: string }}
+ * @returns {{ messages: Array<any>, system: string }}
  */
 export function formatToAnthropic(messages, config = {}) {
+    /** @type {any[]} */
     const validMsgs = sanitizeMessages(messages);
 
     // Extract leading system messages
@@ -52,6 +54,7 @@ export function formatToAnthropic(messages, config = {}) {
     const remainingMsgs = validMsgs.slice(splitIdx);
 
     // Non-leading system messages → user role with "system: " prefix
+    /** @type {any[]} */
     const chatMsgs = remainingMsgs.map(m => {
         if (m.role === 'system') {
             const content = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
@@ -60,6 +63,7 @@ export function formatToAnthropic(messages, config = {}) {
         return m;
     });
 
+    /** @type {any[]} */
     const formattedMsgs = [];
     for (const m of chatMsgs) {
         const role = m.role === 'assistant' ? 'assistant' : 'user';
@@ -81,7 +85,7 @@ export function formatToAnthropic(messages, config = {}) {
                         });
                         continue;
                     }
-                    const { mimeType: mediaType_raw, data } = parseBase64DataUri(modal.base64);
+                    const { mimeType: mediaType_raw, data } = parseBase64DataUri(/** @type {string} */ (modal.base64));
                     const mediaType = mediaType_raw || 'image/png';
                     imageParts.push({
                         type: 'image',

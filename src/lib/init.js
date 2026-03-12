@@ -1,3 +1,4 @@
+// @ts-check
 /**
  * init.js — Boot sequence for Cupcake Provider Manager.
  *
@@ -68,7 +69,7 @@ function _exposeScopeToWindow() {
         _normalizeTokenUsage, _showTokenUsageToast, _needsCopilotResponsesAPI,
     };
     for (const [k, v] of Object.entries(fns)) {
-        window[k] = v;
+        /** @type {any} */ (window)[k] = v;
     }
 
     const objs = {
@@ -77,18 +78,18 @@ function _exposeScopeToWindow() {
         CPM_SLOT_LIST, AwsV4Signer, ThoughtSignatureCache, _tokenUsageStore,
     };
     for (const [k, v] of Object.entries(objs)) {
-        window[k] = v;
+        /** @type {any} */ (window)[k] = v;
     }
 
     // Mutable state — define getters/setters that proxy to the state object
     const lets = {
-        ALL_DEFINED_MODELS: [() => state.ALL_DEFINED_MODELS, v => { state.ALL_DEFINED_MODELS = v; }],
-        CUSTOM_MODELS_CACHE: [() => state.CUSTOM_MODELS_CACHE, v => { state.CUSTOM_MODELS_CACHE = v; }],
-        _currentExecutingPluginId: [() => state._currentExecutingPluginId, v => { state._currentExecutingPluginId = v; }],
-        vertexTokenCache: [() => state.vertexTokenCache, v => { state.vertexTokenCache = v; }],
+        ALL_DEFINED_MODELS: [() => state.ALL_DEFINED_MODELS, (/** @type {any} */ v) => { state.ALL_DEFINED_MODELS = v; }],
+        CUSTOM_MODELS_CACHE: [() => state.CUSTOM_MODELS_CACHE, (/** @type {any} */ v) => { state.CUSTOM_MODELS_CACHE = v; }],
+        _currentExecutingPluginId: [() => state._currentExecutingPluginId, (/** @type {any} */ v) => { state._currentExecutingPluginId = v; }],
+        vertexTokenCache: [() => state.vertexTokenCache, (/** @type {any} */ v) => { state.vertexTokenCache = v; }],
     };
     for (const [k, [g, s]] of Object.entries(lets)) {
-        Object.defineProperty(window, k, { get: g, set: s, configurable: true });
+        Object.defineProperty(window, k, { get: /** @type {any} */ (g), set: /** @type {any} */ (s), configurable: true });
     }
 
     cpmWindow.CPM_VERSION = CPM_VERSION;
@@ -199,14 +200,14 @@ setupCupcakeAPI();
 
         // ── Phase: Dynamic Model Fetching ──
         _phaseStart('dynamic-models');
-        for (const { name, fetchDynamicModels } of pendingDynamicFetchers) {
+        for (const { name, fetchDynamicModels } of /** @type {any[]} */ (pendingDynamicFetchers)) {
             try {
                 const enabled = await isDynamicFetchEnabled(name);
                 if (!enabled) { console.log(`[CupcakePM] Dynamic fetch disabled for ${name}, using fallback.`); continue; }
                 console.log(`[CupcakePM] Fetching dynamic models for ${name}...`);
                 const dynamicModels = await fetchDynamicModels();
                 if (dynamicModels && Array.isArray(dynamicModels) && dynamicModels.length > 0) {
-                    state.ALL_DEFINED_MODELS = state.ALL_DEFINED_MODELS.filter(m => m.provider !== name);
+                    state.ALL_DEFINED_MODELS = state.ALL_DEFINED_MODELS.filter((/** @type {any} */ m) => m.provider !== name);
                     for (const m of dynamicModels) {
                         state.ALL_DEFINED_MODELS.push({ ...m, provider: name });
                     }
@@ -215,7 +216,7 @@ setupCupcakeAPI();
                     console.log(`[CupcakePM] No dynamic models for ${name}, using fallback.`);
                 }
             } catch (e) {
-                console.warn(`[CupcakePM] Dynamic fetch failed for ${name}:`, e.message || e);
+                console.warn(`[CupcakePM] Dynamic fetch failed for ${name}:`, /** @type {Error} */ (e).message || e);
             }
         }
         _phaseDone('dynamic-models');
@@ -269,7 +270,7 @@ setupCupcakeAPI();
             }
 
             // Register custom models into ALL_DEFINED_MODELS
-            state.CUSTOM_MODELS_CACHE.forEach(m => {
+            state.CUSTOM_MODELS_CACHE.forEach((/** @type {any} */ m) => {
                 state.ALL_DEFINED_MODELS.push({
                     uniqueId: m.uniqueId,
                     id: m.model,
@@ -279,7 +280,7 @@ setupCupcakeAPI();
             });
 
             // Sort alphabetically by provider, then by name
-            state.ALL_DEFINED_MODELS.sort((a, b) => {
+            state.ALL_DEFINED_MODELS.sort((/** @type {any} */ a, /** @type {any} */ b) => {
                 const providerCompare = a.provider.localeCompare(b.provider);
                 if (providerCompare !== 0) return providerCompare;
                 return a.name.localeCompare(b.name);
@@ -291,7 +292,7 @@ setupCupcakeAPI();
         _phaseStart('model-registration');
         let _modelRegCount = 0;
         try {
-            for (const modelDef of state.ALL_DEFINED_MODELS) {
+            for (const modelDef of /** @type {any[]} */ (state.ALL_DEFINED_MODELS)) {
                 const pLabel = modelDef.provider;
                 const mLabel = modelDef.name;
 
@@ -315,11 +316,11 @@ setupCupcakeAPI();
                     modelFlags.push(14);   // DeveloperRole
                 }
 
-                await Risu.addProvider(`🧁 [${pLabel}] ${mLabel}`, async (args, abortSignal) => {
+                await Risu.addProvider(`🧁 [${pLabel}] ${mLabel}`, async (/** @type {any} */ args, /** @type {any} */ abortSignal) => {
                     try {
                         return await handleRequest(args, modelDef, abortSignal);
                     } catch (err) {
-                        return { success: false, content: `[Cupcake SDK Fallback Crash] ${err.message}` };
+                        return { success: false, content: `[Cupcake SDK Fallback Crash] ${/** @type {Error} */ (err).message}` };
                     }
                 }, {
                     model: { flags: modelFlags },
@@ -333,10 +334,23 @@ setupCupcakeAPI();
         }
 
         // ── Phase: Silent Update Check (deferred 5s) ──
-        // Sequential: manifest check first, then JS fallback only if manifest didn't cover main plugin
+        // First, do a one-shot retry only if the previous boot left a pending
+        // main-plugin update marker. This avoids repeated polling / heavy work.
+        // If no pending marker exists, run the normal manifest → JS fallback checks.
         setTimeout(async () => {
-            try { await SubPluginManager.checkVersionsQuiet(); } catch (_) { }
-            try { await SubPluginManager.checkMainPluginVersionQuiet(); } catch (_) { }
+            let retryHandled = false;
+            try {
+                retryHandled = (typeof /** @type {any} */ (SubPluginManager).retryPendingMainPluginUpdateOnBoot === 'function')
+                    ? !!(await /** @type {any} */ (SubPluginManager).retryPendingMainPluginUpdateOnBoot())
+                    : false;
+            } catch (_) { }
+            // Sub-plugin version checks always run (checkVersionsQuiet has its own
+            // 10-min cooldown).  Only the main-plugin JS-fallback is skipped when
+            // the boot retry already handled the main update.
+            try { await /** @type {any} */ (SubPluginManager).checkVersionsQuiet(); } catch (_) { }
+            if (!retryHandled) {
+                try { await /** @type {any} */ (SubPluginManager).checkMainPluginVersionQuiet(); } catch (_) { }
+            }
         }, 5000);
 
         // ── Phase: Keyboard Shortcut + Touch Gesture ──
@@ -350,7 +364,7 @@ setupCupcakeAPI();
                 if (!rootDoc) {
                     console.log('[CPM] Hotkey registration skipped: main DOM permission not granted.');
                 } else {
-                    await rootDoc.addEventListener('keydown', (e) => {
+                    await rootDoc.addEventListener('keydown', (/** @type {any} */ e) => {
                         if (e.ctrlKey && e.shiftKey && e.altKey && (e.key === 'p' || e.key === 'P')) {
                             openCpmSettings();
                         }
@@ -358,6 +372,7 @@ setupCupcakeAPI();
 
                     // 4-finger touch gesture for mobile
                     let activePointersCount = 0;
+                    /** @type {ReturnType<typeof setTimeout> | null} */
                     let activePointersTimer = null;
 
                     const addPointer = () => {
@@ -397,6 +412,7 @@ setupCupcakeAPI();
         } catch (_) { /* pluginStorage may not be available */ }
 
     } catch (e) {
+        const _errAny = /** @type {any} */ (e);
         console.error(`[CPM] Unexpected init fail at phase '${_bootPhase}':`, e);
         console.error(`[CPM] Completed phases before crash:`, _completedPhases);
 
@@ -413,7 +429,7 @@ setupCupcakeAPI();
                             <p style="color:#ccc;margin:20px 0;">The plugin failed to initialize properly.</p>
                             <p style="color:#aaa;">Failed at phase: <code>${_bootPhase}</code></p>
                             <p style="color:#aaa;">Completed: ${_completedPhases.join(', ') || 'none'}</p>
-                            <pre style="background:#0d1117;color:#ff7b72;padding:16px;border-radius:8px;overflow:auto;max-height:300px;font-size:13px;">${String(e && e.stack ? e.stack : e).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>
+                            <pre style="background:#0d1117;color:#ff7b72;padding:16px;border-radius:8px;overflow:auto;max-height:300px;font-size:13px;">${String(_errAny && _errAny.stack ? _errAny.stack : _errAny).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>
                             <p style="color:#aaa;margin-top:20px;">Try: reload (Ctrl+Shift+R) or re-import the plugin.</p>
                             <button onclick="document.body.innerHTML='';Risu.hideContainer();"
                                 style="margin-top:20px;padding:10px 24px;background:#e74c3c;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px;">Close</button>

@@ -1,3 +1,4 @@
+// @ts-check
 /**
  * format-openai.js — Format messages for OpenAI-compatible APIs.
  * Handles multimodal content, role normalization, developer role conversion.
@@ -7,17 +8,18 @@ import { hasNonEmptyMessageContent, parseBase64DataUri } from './helpers.js';
 
 /**
  * Format messages for OpenAI Chat Completions API.
- * @param {Array} messages - Raw message array from RisuAI
- * @param {Object} config - Formatting options
+ * @param {Array<any>} messages - Raw message array from RisuAI
+ * @param {object} config - Formatting options
  * @param {boolean} [config.mergesys] - Merge system messages into first user message
  * @param {boolean} [config.mustuser] - Ensure first message is user/system
  * @param {boolean} [config.altrole] - Convert assistant→model (for Gemini-style APIs)
  * @param {boolean} [config.sysfirst] - Move first system message to top
  * @param {boolean} [config.developerRole] - Convert system→developer (GPT-5 series)
- * @returns {Array} Formatted messages array
+ * @returns {Array<any>} Formatted messages array
  */
 export function formatToOpenAI(messages, config = {}) {
     // Step 1: Deep sanitize — remove nulls, strip internal RisuAI tags
+    /** @type {Record<string, any>[]} */
     let msgs = sanitizeMessages(messages);
 
     if (config.mergesys) {
@@ -64,7 +66,7 @@ export function formatToOpenAI(messages, config = {}) {
                     if (modal.base64) contentParts.push({ type: 'image_url', image_url: { url: modal.base64 } });
                     else if (modal.url) contentParts.push({ type: 'image_url', image_url: { url: modal.url } });
                 } else if (modal.type === 'audio') {
-                    const { mimeType: _audioMime, data: _audioData } = parseBase64DataUri(modal.base64);
+                    const { mimeType: _audioMime, data: _audioData } = parseBase64DataUri(modal.base64 ?? '');
                     let _audioFormat = 'mp3';
                     if (_audioMime) {
                         const _m = _audioMime.toLowerCase();

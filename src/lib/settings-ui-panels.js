@@ -1,3 +1,4 @@
+// @ts-check
 /**
  * settings-ui-panels.js — API View panel + Export/Import.
  * Extracted from settings-ui.js for modularity.
@@ -12,11 +13,11 @@ import {
 
 // ── API View Panel ──
 export function initApiViewPanel() {
-    const _renderApiViewEntry = (r) => {
+    const _renderApiViewEntry = (/** @type {any} */ r) => {
         if (!r) return '<div class="text-gray-500 text-center py-8">선택한 요청 데이터가 없습니다.</div>';
-        const redactKey = (v) => { if (!v || typeof v !== 'string') return v; if (v.length <= 8) return '***'; return v.slice(0, 4) + '...' + v.slice(-4); };
-        const redactHeaders = (headers) => { const h = { ...headers }; for (const k of Object.keys(h)) { if (/auth|key|token|secret|bearer/i.test(k)) h[k] = redactKey(h[k]); } return h; };
-        const formatJson = (obj) => { try { return JSON.stringify(obj, null, 2); } catch { return String(obj); } };
+        const redactKey = (/** @type {any} */ v) => { if (!v || typeof v !== 'string') return v; if (v.length <= 8) return '***'; return v.slice(0, 4) + '...' + v.slice(-4); };
+        const redactHeaders = (/** @type {any} */ headers) => { const h = { ...headers }; for (const k of Object.keys(h)) { if (/auth|key|token|secret|bearer/i.test(k)) h[k] = redactKey(h[k]); } return h; };
+        const formatJson = (/** @type {any} */ obj) => { try { return JSON.stringify(obj, null, 2); } catch { return String(obj); } };
         const statusColor = r.status >= 200 && r.status < 300 ? 'text-green-400' : (typeof r.status === 'number' ? 'text-red-400' : 'text-yellow-400');
         const hasHttpDetails = !!r.url;
         return `<div class="space-y-3">
@@ -53,14 +54,14 @@ export function initApiViewPanel() {
         contentEl.innerHTML = _renderApiViewEntry(_getApiRequestById(selector.value));
     };
 
-    document.getElementById('cpm-api-view-btn').addEventListener('click', () => {
+    document.getElementById('cpm-api-view-btn')?.addEventListener('click', () => {
         /** @type {HTMLDivElement | null} */
         const panel = /** @type {HTMLDivElement | null} */ (document.getElementById('cpm-api-view-panel'));
         if (!panel) return;
         if (!panel.classList.contains('hidden')) { panel.classList.add('hidden'); return; }
         _refreshApiViewPanel(); panel.classList.remove('hidden');
     });
-    document.getElementById('cpm-api-view-selector').addEventListener('change', (e) => {
+    document.getElementById('cpm-api-view-selector')?.addEventListener('change', (e) => {
         /** @type {HTMLSelectElement | null} */
         const selector = /** @type {HTMLSelectElement | null} */ (e.target);
         /** @type {HTMLDivElement | null} */
@@ -68,7 +69,7 @@ export function initApiViewPanel() {
         if (!selector || !contentEl) return;
         contentEl.innerHTML = _renderApiViewEntry(_getApiRequestById(selector.value));
     });
-    document.getElementById('cpm-api-view-close').addEventListener('click', () => {
+    document.getElementById('cpm-api-view-close')?.addEventListener('click', () => {
         /** @type {HTMLDivElement | null} */
         const panel = /** @type {HTMLDivElement | null} */ (document.getElementById('cpm-api-view-panel'));
         if (panel) panel.classList.add('hidden');
@@ -76,9 +77,9 @@ export function initApiViewPanel() {
 }
 
 // ── Export/Import ──
-export function initExportImport(setVal, openCpmSettings) {
-    document.getElementById('cpm-export-btn').addEventListener('click', async () => {
-        const exportData = {};
+export function initExportImport(/** @type {any} */ setVal, /** @type {any} */ openCpmSettings) {
+    document.getElementById('cpm-export-btn')?.addEventListener('click', async () => {
+        const exportData = /** @type {Record<string, any>} */ ({});
         for (const key of getManagedSettingKeys()) {
             const val = await safeGetArg(key);
             if (val !== undefined && val !== '') exportData[key] = val;
@@ -88,7 +89,7 @@ export function initExportImport(setVal, openCpmSettings) {
         document.body.appendChild(a); a.click(); a.remove();
     });
 
-    document.getElementById('cpm-import-btn').addEventListener('click', () => {
+    document.getElementById('cpm-import-btn')?.addEventListener('click', () => {
         const input = document.createElement('input'); input.type = 'file'; input.accept = '.json';
         input.onchange = e => {
             /** @type {HTMLInputElement | null} */
@@ -111,7 +112,7 @@ export function initExportImport(setVal, openCpmSettings) {
                     }
                     alert('설정을 성공적으로 불러왔습니다!');
                     openCpmSettings();
-                } catch (err) { alert('설정 파일 읽기 오류: ' + err.message); }
+                } catch (err) { alert('설정 파일 읽기 오류: ' + /** @type {Error} */ (err).message); }
             };
             reader.readAsText(file);
         };

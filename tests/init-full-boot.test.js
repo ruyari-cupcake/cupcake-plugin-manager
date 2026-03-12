@@ -3,7 +3,7 @@
  * to cover model registration loop, custom model migration, dynamic models,
  * hotkey registration, and boot status recording.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const h = vi.hoisted(() => {
     const mockArgStore = {};
@@ -100,6 +100,7 @@ vi.mock('../src/lib/sub-plugin-manager.js', () => ({
     SubPluginManager: {
         loadRegistry: vi.fn(async () => {}),
         executeEnabled: vi.fn(async () => {}),
+        retryPendingMainPluginUpdateOnBoot: vi.fn(async () => false),
         checkVersionsQuiet: vi.fn(async () => {}),
         checkMainPluginVersionQuiet: vi.fn(async () => {}),
         _pendingUpdateNames: [],
@@ -131,6 +132,10 @@ describe('init.js full boot — model registration path', () => {
         delete globalThis._cpmVersionChecked;
         // Reset the cpmShortcutRegistered flag
         delete globalThis.cpmShortcutRegistered;
+    });
+
+    afterEach(() => {
+        vi.useRealTimers();
     });
 
     it('registers models with Risu.addProvider for each model in ALL_DEFINED_MODELS', async () => {
@@ -215,6 +220,31 @@ describe('init.js full boot — model registration path', () => {
         expect(h.mockState.ALL_DEFINED_MODELS.some(m => m.name === 'Dynamic Model')).toBe(true);
     });
 
+    it('runs JS fallback check when boot retry returns false', async () => {
+        vi.useFakeTimers();
+
+        await import('../src/lib/init.js');
+        await vi.advanceTimersByTimeAsync(5200);
+
+        const { SubPluginManager } = await import('../src/lib/sub-plugin-manager.js');
+        expect(SubPluginManager.retryPendingMainPluginUpdateOnBoot).toHaveBeenCalled();
+        expect(SubPluginManager.checkVersionsQuiet).toHaveBeenCalled();
+        expect(SubPluginManager.checkMainPluginVersionQuiet).toHaveBeenCalled();
+    });
+
+    it('skips JS fallback check when boot retry already handled the main update', async () => {
+        vi.useFakeTimers();
+        const { SubPluginManager } = await import('../src/lib/sub-plugin-manager.js');
+        SubPluginManager.retryPendingMainPluginUpdateOnBoot.mockResolvedValue(true);
+
+        await import('../src/lib/init.js');
+        await vi.advanceTimersByTimeAsync(5200);
+
+        expect(SubPluginManager.retryPendingMainPluginUpdateOnBoot).toHaveBeenCalled();
+        expect(SubPluginManager.checkVersionsQuiet).toHaveBeenCalled();
+        expect(SubPluginManager.checkMainPluginVersionQuiet).not.toHaveBeenCalled();
+    });
+
     it('auto-migrates C1-C9 legacy custom models when JSON is empty', async () => {
         h.mockArgStore['cpm_custom_models'] = '[]';
         h.mockArgStore['cpm_c1_url'] = 'http://legacy-url.com';
@@ -230,6 +260,79 @@ describe('init.js full boot — model registration path', () => {
             'cpm_custom_models',
             expect.stringContaining('Legacy Model')
         );
+    });
+
+    it('auto-migrates C1-C9 with all boolean/string fields preserved', async () => {
+        h.mockArgStore['cpm_custom_models'] = '[]';
+        h.mockArgStore['cpm_c1_url'] = 'http://legacy.com';
+        h.mockArgStore['cpm_c1_model'] = 'legacy-model';
+        h.mockArgStore['cpm_c1_name'] = 'Legacy 1';
+        h.mockArgStore['cpm_c1_key'] = 'sk-legacy';
+        h.mockArgStore['cpm_c1_format'] = 'anthropic';
+        h.mockArgStore['cpm_c1_sysfirst'] = 'true';
+        h.mockArgStore['cpm_c1_altrole'] = 'true';
+        h.mockArgStore['cpm_c1_mustuser'] = 'true';
+        h.mockArgStore['cpm_c1_maxout'] = 'true';
+        h.mockArgStore['cpm_c1_mergesys'] = 'true';
+        h.mockArgStore['cpm_c1_decoupled'] = 'true';
+        h.mockArgStore['cpm_c1_thought'] = 'true';
+        h.mockArgStore['cpm_c1_reasoning'] = 'parsed';
+        h.mockArgStore['cpm_c1_verbosity'] = 'high';
+        h.mockArgStore['cpm_c1_thinking'] = 'auto';
+        h.mockArgStore['cpm_c1_tok'] = 'cl100k_base';
+
+        // Also add C2 with minimal fields to verify multiple models
+        h.mockArgStore['cpm_c2_url'] = 'http://legacy2.com';
+        h.mockArgStore['cpm_c2_model'] = 'model-2';
+
+        await import('../src/lib/init.js');
+        await tick(200);
+
+        expect(h.mockState.CUSTOM_MODELS_CACHE.length).toBe(2);
+
+        const c1 = h.mockState.CUSTOM_MODELS_CACHE.find(m => m.uniqueId === 'custom1');
+        expect(c1).toBeDefined();
+        expect(c1.name).toBe('Legacy 1');
+        expect(c1.model).toBe('legacy-model');
+        expect(c1.url).toBe('http://legacy.com');
+        expect(c1.key).toBe('sk-legacy');
+        expect(c1.format).toBe('anthropic');
+        expect(c1.sysfirst).toBe(true);
+        expect(c1.altrole).toBe(true);
+        expect(c1.mustuser).toBe(true);
+        expect(c1.maxout).toBe(true);
+        expect(c1.mergesys).toBe(true);
+        expect(c1.decoupled).toBe(true);
+        expect(c1.thought).toBe(true);
+        expect(c1.reasoning).toBe('parsed');
+        expect(c1.verbosity).toBe('high');
+        expect(c1.thinking).toBe('auto');
+        expect(c1.tok).toBe('cl100k_base');
+        expect(c1.customParams).toBe('');
+        expect(c1.responsesMode).toBe('auto');
+
+        const c2 = h.mockState.CUSTOM_MODELS_CACHE.find(m => m.uniqueId === 'custom2');
+        expect(c2).toBeDefined();
+        expect(c2.name).toBe('Custom 2'); // default name
+        expect(c2.model).toBe('model-2');
+        expect(c2.format).toBe('openai'); // default
+    });
+
+    it('silent update check handles retryPendingMainPluginUpdateOnBoot throwing', async () => {
+        vi.useFakeTimers();
+        const { SubPluginManager } = await import('../src/lib/sub-plugin-manager.js');
+        SubPluginManager.retryPendingMainPluginUpdateOnBoot.mockRejectedValue(
+            new Error('network error during retry')
+        );
+
+        await import('../src/lib/init.js');
+        // Advance past the 5s deferred setTimeout
+        await vi.advanceTimersByTimeAsync(5200);
+
+        // Should not crash — error is caught silently
+        expect(SubPluginManager.retryPendingMainPluginUpdateOnBoot).toHaveBeenCalled();
+        // checkVersionsQuiet should still be called (in the catch-all or after)
+        expect(SubPluginManager.checkVersionsQuiet).toHaveBeenCalled();
     });
 
     it('handles streaming enabled + capable branch', async () => {
@@ -265,5 +368,53 @@ describe('init.js full boot — model registration path', () => {
 
         expect(SettingsBackup.load).toHaveBeenCalled();
         expect(SettingsBackup.restoreIfEmpty).toHaveBeenCalled();
+    });
+
+    it('skips duplicate hotkey registration when shortcut flag is already set', async () => {
+        globalThis.cpmShortcutRegistered = true;
+
+        await import('../src/lib/init.js');
+        await tick(200);
+
+        expect(h.risu.getRootDocument).not.toHaveBeenCalled();
+        expect(h.mockRootDoc.addEventListener).not.toHaveBeenCalled();
+    });
+
+    it('warns in boot summary when a phase fails but boot continues', async () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const { SettingsBackup } = await import('../src/lib/settings-backup.js');
+        SettingsBackup.load.mockRejectedValueOnce(new Error('restore failed'));
+
+        await import('../src/lib/init.js');
+        await tick(200);
+
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Boot completed with 1 warning(s):'), expect.arrayContaining([expect.stringContaining('settings-restore')]));
+        warnSpy.mockRestore();
+    });
+
+    it('ignores boot-status persistence failures at the end of boot', async () => {
+        h.risu.pluginStorage.setItem.mockRejectedValueOnce(new Error('pluginStorage down'));
+
+        await expect(import('../src/lib/init.js')).resolves.toBeDefined();
+        await tick(200);
+
+        expect(h.risu.registerSetting).toHaveBeenCalled();
+    });
+
+    it('logs fallback message when dynamic fetch returns no models', async () => {
+        const fetchDyn = vi.fn(async () => []);
+        const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+        h.mockPendingDynamicFetchers.push({
+            name: 'DynProv',
+            fetchDynamicModels: fetchDyn,
+        });
+        h.mockIsDynamicFetchEnabled.mockResolvedValue(true);
+
+        await import('../src/lib/init.js');
+        await tick(200);
+
+        expect(fetchDyn).toHaveBeenCalled();
+        expect(logSpy).toHaveBeenCalledWith('[CupcakePM] No dynamic models for DynProv, using fallback.');
+        logSpy.mockRestore();
     });
 });

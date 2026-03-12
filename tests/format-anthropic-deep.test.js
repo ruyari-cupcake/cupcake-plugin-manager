@@ -370,3 +370,133 @@ describe('_mergeOrPush — additional edge cases', () => {
         expect(msgs).toHaveLength(1);
     });
 });
+
+// ── Additional uncovered branch tests ──
+
+describe('formatToAnthropic — branch gap coverage', () => {
+    it('skips image_url with blob: URL (not data: or http:)', () => {
+        const messages = [{
+            role: 'user',
+            content: [
+                { type: 'image_url', image_url: 'blob:null/some-uuid' },
+                { text: 'Remaining text' },
+            ],
+        }];
+        const { messages: msgs } = formatToAnthropic(messages);
+        // blob: URL should be skipped since it's not data: or http(s):
+        const imageParts = msgs[0].content.filter(b => b.type === 'image');
+        expect(imageParts).toHaveLength(0);
+        expect(msgs[0].content).toEqual([{ type: 'text', text: 'Remaining text' }]);
+    });
+
+    it('skips image_url with relative path URL', () => {
+        const messages = [{
+            role: 'user',
+            content: [
+                { type: 'image_url', image_url: '/images/photo.jpg' },
+                { text: 'Text' },
+            ],
+        }];
+        const { messages: msgs } = formatToAnthropic(messages);
+        const imageParts = msgs[0].content.filter(b => b.type === 'image');
+        expect(imageParts).toHaveLength(0);
+    });
+
+    it('handles cachePoint on the very first message (ci=0)', () => {
+        const messages = [
+            { role: 'user', content: 'First message with cache', cachePoint: true },
+            { role: 'assistant', content: 'Reply' },
+        ];
+        const { messages: msgs } = formatToAnthropic(messages, { caching: true });
+        // ci=0 means ci > 0 is false, so fmtIdx stays at 0
+        // The cachePoint should still be applied to fmtIdx=0
+        const userMsg = msgs[0];
+        expect(Array.isArray(userMsg.content)).toBe(true);
+        const lastBlock = userMsg.content[userMsg.content.length - 1];
+        expect(lastBlock.cache_control).toEqual({ type: 'ephemeral' });
+    });
+
+    it('handles cachePoint when first chatMsg is at ci=0 after system extraction', () => {
+        const messages = [
+            { role: 'system', content: 'System prompt' },
+            { role: 'user', content: 'User question', cachePoint: true },
+            { role: 'assistant', content: 'Answer' },
+        ];
+        const { messages: msgs, system } = formatToAnthropic(messages, { caching: true });
+        expect(system).toBe('System prompt');
+        // The user message is chatMsgs[0], ci=0 → fmtIdx=0
+        const userMsg = msgs[0];
+        const lastBlock = userMsg.content[userMsg.content.length - 1];
+        expect(lastBlock.cache_control).toEqual({ type: 'ephemeral' });
+    });
+
+    it('handles inlineData with missing mimeType entirely', () => {
+        const messages = [{
+            role: 'user',
+            content: [
+                { inlineData: { data: 'some_data' } },
+                { text: 'Text part' },
+            ],
+        }];
+        const { messages: msgs } = formatToAnthropic(messages);
+        // mimeType defaults to 'application/octet-stream', which doesn't start with 'image/'
+        // so the inlineData part should be skipped
+        expect(msgs[0].content).toEqual([{ type: 'text', text: 'Text part' }]);
+    });
+
+    it('handles input_image type with blob: URL in array content', () => {
+        const messages = [{
+            role: 'user',
+            content: [
+                { type: 'input_image', image_url: 'blob:null/uuid-test' },
+                { text: 'Text' },
+            ],
+        }];
+        const { messages: msgs } = formatToAnthropic(messages);
+        // blob: URL should be skipped
+        expect(msgs[0].content).toEqual([{ type: 'text', text: 'Text' }]);
+    });
+
+    it('handles image_url as object without url property', () => {
+        const messages = [{
+            role: 'user',
+            content: [
+                { type: 'image_url', image_url: { detail: 'high' } }, // no .url
+                { text: 'Text' },
+            ],
+        }];
+        const { messages: msgs } = formatToAnthropic(messages);
+        // extractImageUrlFromPart returns '' for { detail: 'high' } (no .url)
+        // empty string doesn't match data: or http: → skipped
+        expect(msgs[0].content).toEqual([{ type: 'text', text: 'Text' }]);
+    });
+
+    it('handles multimodal image with url that does not start with http', () => {
+        const messages = [{
+            role: 'user',
+            content: 'Look at this',
+            multimodals: [{ type: 'image', url: 'ftp://example.com/photo.jpg' }],
+        }];
+        const { messages: msgs } = formatToAnthropic(messages);
+        // ftp:// URL goes to base64 path (not http/https), parses as raw data
+        const imgBlock = msgs[0].content.find(b => b.type === 'image');
+        expect(imgBlock).toBeDefined();
+        // Since url is in .url (not .base64), the base64 path reads .base64 which is undefined
+        // parseBase64DataUri(undefined) returns { mimeType: null, data: '' }
+        // But the code reads modal.base64, not modal.url for the base64 path
+    });
+
+    it('handles multiple consecutive same-role messages with cachePoint', () => {
+        const messages = [
+            { role: 'user', content: 'A' },
+            { role: 'user', content: 'B', cachePoint: true },
+            { role: 'assistant', content: 'Reply' },
+        ];
+        const { messages: msgs } = formatToAnthropic(messages, { caching: true, claude1HourCaching: true });
+        // A and B merge into one user message; B's cachePoint applies at ci=1
+        // Since ci=1, ci>0 is true, prevRole===curRole → no fmtIdx increment
+        const userMsg = msgs[0];
+        const lastBlock = userMsg.content[userMsg.content.length - 1];
+        expect(lastBlock.cache_control).toEqual({ type: 'ephemeral', ttl: '1h' });
+    });
+});

@@ -223,3 +223,101 @@ describe('schemas.settingsBackup', () => {
         expect(r.ok).toBe(false);
     });
 });
+
+// ── Missing schema and edge-case coverage ──
+
+describe('schemas.bootStatus', () => {
+    it('validates correct bootStatus object', () => {
+        const r = validateSchema({ ts: Date.now(), version: '1.20.0' }, schemas.bootStatus);
+        expect(r.ok).toBe(true);
+        expect(r.data.ts).toBeTypeOf('number');
+        expect(r.data.version).toBe('1.20.0');
+    });
+
+    it('applies property-level fallbacks for invalid fields', () => {
+        const r = validateSchema({ ts: 'not-a-number', version: 42 }, schemas.bootStatus);
+        expect(r.ok).toBe(true);
+        expect(r.data.ts).toBe(0);       // number fallback
+        expect(r.data.version).toBe('');  // string fallback
+    });
+
+    it('rejects non-object input', () => {
+        const r = validateSchema('bad', schemas.bootStatus);
+        expect(r.ok).toBe(false);
+        expect(r.fallback).toEqual({});
+    });
+
+    it('accepts empty object (no required keys)', () => {
+        const r = validateSchema({}, schemas.bootStatus);
+        expect(r.ok).toBe(true);
+    });
+});
+
+describe('schemas.updateBundleVersions', () => {
+    it('validates a plain object', () => {
+        const r = validateSchema({ 'Plugin A': { version: '1.0' } }, schemas.updateBundleVersions);
+        expect(r.ok).toBe(true);
+    });
+
+    it('rejects non-object', () => {
+        const r = validateSchema([1, 2], schemas.updateBundleVersions);
+        expect(r.ok).toBe(false);
+        expect(r.fallback).toEqual({});
+    });
+
+    it('rejects null', () => {
+        const r = validateSchema(null, schemas.updateBundleVersions);
+        expect(r.ok).toBe(false);
+    });
+});
+
+describe('validateSchema — unknown type passthrough', () => {
+    it('passes data through when schema type is unrecognized', () => {
+        const r = validateSchema(42, { type: /** @type {any} */ ('custom') });
+        expect(r.ok).toBe(true);
+        expect(r.data).toBe(42);
+    });
+
+    it('passes object through with unknown type', () => {
+        const data = { foo: 'bar' };
+        const r = validateSchema(data, { type: /** @type {any} */ ('weird') });
+        expect(r.ok).toBe(true);
+        expect(r.data).toBe(data);
+    });
+});
+
+describe('validateSchema — combined array constraints', () => {
+    it('applies maxItems AND items filter together', () => {
+        const r = validateSchema(
+            [{ id: 'a' }, 'bad', { id: 'b' }, { id: 'c' }, 'bad2', { id: 'd' }],
+            {
+                type: 'array',
+                maxItems: 4,               // truncates to first 4 elements
+                items: { type: 'object' },  // then filters non-objects
+            }
+        );
+        expect(r.ok).toBe(true);
+        // First 4: [{id:'a'}, 'bad', {id:'b'}, {id:'c'}] → after items filter: [{id:'a'}, {id:'b'}, {id:'c'}]
+        expect(r.data).toHaveLength(3);
+    });
+
+    it('array fallback defaults to [] when no explicit fallback', () => {
+        const r = validateSchema('not-array', { type: 'array' });
+        expect(r.ok).toBe(false);
+        expect(r.fallback).toEqual([]);
+    });
+});
+
+describe('validateSchema — string maxLength boundary', () => {
+    it('does not truncate string of exactly maxLength', () => {
+        const r = validateSchema('abcde', { type: 'string', maxLength: 5 });
+        expect(r.ok).toBe(true);
+        expect(r.data).toBe('abcde');
+    });
+
+    it('truncates string one char over maxLength', () => {
+        const r = validateSchema('abcdef', { type: 'string', maxLength: 5 });
+        expect(r.ok).toBe(true);
+        expect(r.data).toBe('abcde');
+    });
+});

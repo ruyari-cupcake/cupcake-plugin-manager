@@ -1,3 +1,4 @@
+// @ts-check
 /**
  * settings-ui.js — Cupcake PM settings panel (core orchestrator).
  * Renders the full-screen settings interface with Tailwind CSS.
@@ -18,49 +19,29 @@ import { escHtml } from './helpers.js';
 import { renderCustomModelEditor, initCustomModelsManager } from './settings-ui-custom-models.js';
 import { buildPluginsTabRenderer } from './settings-ui-plugins.js';
 import { initApiViewPanel, initExportImport } from './settings-ui-panels.js';
+import { TAILWIND_CSS } from './tailwind-css.generated.js';
 
-/** @type {Promise<HTMLScriptElement | null> | null} */
-let _tailwindLoadPromise = null;
+/** @type {boolean} */
+let _tailwindInjected = false;
 
-export function ensureTailwindLoaded(timeoutMs = 5000) {
-    const existing = /** @type {HTMLScriptElement | null} */ (document.getElementById('cpm-tailwind'));
-    if (existing) {
-        return _tailwindLoadPromise || Promise.resolve(existing);
-    }
+/**
+ * Injects the pre-built Tailwind CSS into the document as a <style> tag.
+ * Replaces the previous CDN-based approach for offline reliability.
+ * @returns {Promise<HTMLStyleElement | null>}
+ */
+export function ensureTailwindLoaded() {
+    const existing = /** @type {HTMLStyleElement | null} */ (document.getElementById('cpm-tailwind'));
+    if (existing) return Promise.resolve(existing);
 
-    _tailwindLoadPromise = new Promise((resolve) => {
-        const tw = document.createElement('script');
-        let settled = false;
-        let timeoutId = 0;
-
-        const finish = (status) => {
-            if (settled) return;
-            settled = true;
-            if (timeoutId) clearTimeout(timeoutId);
-            tw.dataset.cpmLoaded = status;
-            tw.onload = null;
-            tw.onerror = null;
-            if (status !== 'loaded') {
-                console.warn(`[CPM UI] Tailwind CDN load ${status}; continuing with base styles only.`);
-            }
-            _tailwindLoadPromise = Promise.resolve(tw);
-            resolve(tw);
-        };
-
-        tw.id = 'cpm-tailwind';
-        tw.src = 'https://cdn.tailwindcss.com';
-        tw.async = true;
-        tw.dataset.cpmLoaded = 'pending';
-        tw.onload = () => finish('loaded');
-        tw.onerror = () => finish('failed');
-        document.head.appendChild(tw);
-        timeoutId = window.setTimeout(() => finish('timed out'), timeoutMs);
-    });
-
-    return _tailwindLoadPromise;
+    const style = document.createElement('style');
+    style.id = 'cpm-tailwind';
+    style.textContent = TAILWIND_CSS;
+    document.head.appendChild(style);
+    _tailwindInjected = true;
+    return Promise.resolve(style);
 }
 
-export function shouldPersistControl(el) {
+export function shouldPersistControl(/** @type {any} */ el) {
     const id = el?.id || '';
     if (!id) return false;
     if (id.startsWith('cpm-cm-')) return false;
@@ -69,39 +50,41 @@ export function shouldPersistControl(el) {
     return true;
 }
 
-export function bindSettingsPersistenceHandlers(root, setVal) {
+export function bindSettingsPersistenceHandlers(/** @type {any} */ root, /** @type {any} */ setVal) {
     if (!root || typeof root.querySelectorAll !== 'function' || typeof setVal !== 'function') return;
 
-    root.querySelectorAll('input[type="text"], input[type="password"], input[type="number"], select, textarea').forEach(el => {
+    root.querySelectorAll('input[type="text"], input[type="password"], input[type="number"], select, textarea').forEach((/** @type {any} */ el) => {
         if (!shouldPersistControl(el)) return;
-        el.addEventListener('change', (e) => setVal(e.target.id, e.target.value));
+        el.addEventListener('change', (/** @type {any} */ e) => setVal(e.target.id, e.target.value));
     });
 
-    root.querySelectorAll('input[type="checkbox"]').forEach(el => {
+    root.querySelectorAll('input[type="checkbox"]').forEach((/** @type {any} */ el) => {
         if (!shouldPersistControl(el)) return;
-        el.addEventListener('change', (e) => setVal(e.target.id, e.target.checked));
+        el.addEventListener('change', (/** @type {any} */ e) => setVal(e.target.id, e.target.checked));
     });
 }
 
 export async function openCpmSettings() {
     Risu.showContainer('fullscreen');
 
-    // Tailwind CSS
-    await ensureTailwindLoaded();
+    // Tailwind CSS (build-time inlined)
+    ensureTailwindLoaded();
 
     document.body.innerHTML = '';
     document.body.style.cssText = 'margin:0; background:#1e1e24; color:#d1d5db; font-family:-apple-system, sans-serif; height:100vh; overflow:hidden;';
 
-    const getVal = async (k) => await safeGetArg(k);
-    const getBoolVal = async (k) => await safeGetBoolArg(k);
-    const setVal = (k, v) => {
+    const _spmAny = /** @type {any} */ (SubPluginManager);
+
+    const getVal = async (/** @type {string} */ k) => await safeGetArg(k);
+    const getBoolVal = async (/** @type {string} */ k) => await safeGetBoolArg(k);
+    const setVal = (/** @type {string} */ k, /** @type {any} */ v) => {
         Risu.setArgument(k, String(v));
         SettingsBackup.updateKey(k, String(v));
     };
 
-    const escAttr = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const escAttr = (/** @type {any} */ s) => String(s ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-    const renderInput = async (id, label, type = 'text', opts = []) => {
+    const renderInput = async (/** @type {string} */ id, /** @type {string} */ label, type = 'text', /** @type {any[]} */ opts = []) => {
         let html = `<div class="mb-4">`;
         if (type === 'checkbox') {
             const val = await getBoolVal(id);
@@ -165,7 +148,7 @@ export async function openCpmSettings() {
                 <span class="bg-blue-600 text-xs px-2 py-0.5 rounded-full" id="cpm-cm-count">0</span>
             </button>
             <div class="px-4 text-[11px] font-bold text-gray-500 uppercase tracking-wider mt-5 mb-2">Extensions</div>
-            <button class="w-full text-left px-5 py-2 text-sm hover:bg-gray-800 transition-colors focus:outline-none tab-btn text-yellow-300 font-bold bg-yellow-900/10" data-target="tab-plugins">🧩 Sub-Plugins${SubPluginManager._pendingUpdateNames.length > 0 ? ` <span style="background:#4f46e5;color:#e0e7ff;font-size:10px;padding:1px 6px;border-radius:9px;margin-left:4px;font-weight:bold;">${SubPluginManager._pendingUpdateNames.length}</span>` : ''}</button>
+            <button class="w-full text-left px-5 py-2 text-sm hover:bg-gray-800 transition-colors focus:outline-none tab-btn text-yellow-300 font-bold bg-yellow-900/10" data-target="tab-plugins">🧩 Sub-Plugins${_spmAny._pendingUpdateNames.length > 0 ? ` <span style="background:#4f46e5;color:#e0e7ff;font-size:10px;padding:1px 6px;border-radius:9px;margin-left:4px;font-weight:bold;">${_spmAny._pendingUpdateNames.length}</span>` : ''}</button>
             </div>
             <div class="p-4 border-t border-gray-800 space-y-2 shrink-0 bg-gray-900 z-10 relative" id="cpm-tab-footer">
                 <button id="cpm-export-btn" class="w-full bg-blue-600/90 hover:bg-blue-500 text-white font-semibold py-2 px-4 rounded transition-colors text-sm">⬇️ 설정 내보내기</button>
@@ -179,14 +162,14 @@ export async function openCpmSettings() {
     content.className = 'flex-1 bg-[#121214] overflow-y-auto p-5 md:p-10';
 
     const providersList = [{ value: '', text: '🚫 미지정 (Main UI의 모델이 처리)' }];
-    for (const m of state.ALL_DEFINED_MODELS) providersList.push({ value: m.uniqueId, text: `[${m.provider}] ${m.name}` });
+    for (const m of /** @type {any[]} */ (state.ALL_DEFINED_MODELS)) providersList.push({ value: m.uniqueId, text: `[${m.provider}] ${m.name}` });
 
     const reasoningList = [{ value: 'none', text: 'None (없음)' }, { value: 'off', text: 'Off (끄기)' }, { value: 'low', text: 'Low (낮음)' }, { value: 'medium', text: 'Medium (중간)' }, { value: 'high', text: 'High (높음)' }, { value: 'xhigh', text: 'XHigh (매우 높음)' }];
     const verbosityList = [{ value: 'none', text: 'None (기본값)' }, { value: 'low', text: 'Low (낮음)' }, { value: 'medium', text: 'Medium (중간)' }, { value: 'high', text: 'High (높음)' }];
     const thinkingList = [{ value: 'off', text: 'Off (끄기)' }, { value: 'none', text: 'None (없음)' }, { value: 'MINIMAL', text: 'Minimal (최소)' }, { value: 'LOW', text: 'Low (낮음)' }, { value: 'MEDIUM', text: 'Medium (중간)' }, { value: 'HIGH', text: 'High (높음)' }];
     const effortList = [{ value: 'none', text: '사용 안함 (Off)' }, { value: 'unspecified', text: '미지정 (Unspecified)' }, { value: 'low', text: 'Low (낮음)' }, { value: 'medium', text: 'Medium (중간)' }, { value: 'high', text: 'High (높음)' }, { value: 'max', text: 'Max (최대)' }];
 
-    const renderAuxParams = async (slot) => `
+    const renderAuxParams = async (/** @type {string} */ slot) => `
         <div class="mt-8 pt-6 border-t border-gray-800 space-y-2">
             <h4 class="text-xl font-bold text-gray-300 mb-2">Generation Parameters (생성 설정)</h4>
             <p class="text-xs text-blue-400 font-semibold mb-4 border-l-2 border-blue-500 pl-2">
@@ -322,8 +305,8 @@ export async function openCpmSettings() {
                 <h3 class="text-3xl font-bold text-gray-400">Sub-Plugins Manager</h3>
                 <button id="cpm-check-updates-btn" class="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold py-2 px-4 rounded transition-colors text-sm shadow">🔄 서브 플러그인 업데이트 확인</button>
             </div>
-            ${SubPluginManager._pendingUpdateNames.length > 0
-                ? `<div class="bg-indigo-900/40 border border-indigo-700 rounded-lg p-3 mb-4 flex items-center gap-2"><span class="text-indigo-300 text-sm font-semibold">🔔 ${SubPluginManager._pendingUpdateNames.length}개의 서브 플러그인 업데이트가 감지되었습니다.</span></div>`
+            ${_spmAny._pendingUpdateNames.length > 0
+                ? `<div class="bg-indigo-900/40 border border-indigo-700 rounded-lg p-3 mb-4 flex items-center gap-2"><span class="text-indigo-300 text-sm font-semibold">🔔 ${_spmAny._pendingUpdateNames.length}개의 서브 플러그인 업데이트가 감지되었습니다.</span></div>`
                 : ''}
             <p class="text-yellow-300 font-semibold mb-4 border-l-4 border-yellow-500 pl-4 py-1">Cupcake PM에 연동된 외부 확장 기능(Sub-Plugins)들을 통합 관리합니다.</p>
             <div id="cpm-update-status" class="hidden mb-4"></div>
@@ -344,14 +327,14 @@ export async function openCpmSettings() {
     if (registeredProviderTabs.length > 0 && providerTabsSection) {
         let sidebarBtnsHtml = `<div class="px-4 text-[11px] font-bold text-gray-500 uppercase tracking-wider mt-5 mb-2">Providers</div>`;
         let contentHtml = '';
-        for (const tab of registeredProviderTabs) {
+        for (const tab of /** @type {any[]} */ (registeredProviderTabs)) {
             sidebarBtnsHtml += `<button class="w-full text-left px-5 py-2 text-sm hover:bg-gray-800 transition-colors focus:outline-none tab-btn" data-target="${tab.id}">${tab.icon} ${tab.label}</button>`;
             try {
                 const tabContent = await tab.renderContent(renderInput, { reasoningList, verbosityList, thinkingList });
                 contentHtml += `<div id="${tab.id}" class="cpm-tab-content hidden">${tabContent}</div>`;
             } catch (err) {
                 console.error(`[CupcakePM] Failed to render settings tab: ${tab.id}`, err);
-                contentHtml += `<div id="${tab.id}" class="cpm-tab-content hidden"><p class="text-red-400">Error rendering tab: ${err.message}</p></div>`;
+                contentHtml += `<div id="${tab.id}" class="cpm-tab-content hidden"><p class="text-red-400">Error rendering tab: ${/** @type {Error} */ (err).message}</p></div>`;
             }
         }
         providerTabsSection.innerHTML = sidebarBtnsHtml;
@@ -366,6 +349,7 @@ export async function openCpmSettings() {
     const mobileIcon = document.getElementById('cpm-mobile-icon');
     if (mobileMenuBtn) {
         mobileMenuBtn.addEventListener('click', () => {
+            if (!mobileDropdown || !mobileIcon) return;
             const isHidden = mobileDropdown.classList.contains('hidden');
             if (isHidden) { mobileDropdown.classList.remove('hidden'); mobileDropdown.classList.add('flex'); mobileIcon.innerText = '▲'; }
             else { mobileDropdown.classList.add('hidden'); mobileDropdown.classList.remove('flex'); mobileIcon.innerText = '▼'; }
@@ -399,7 +383,7 @@ export async function openCpmSettings() {
         document.getElementById(targetId)?.classList.remove('hidden');
         if (targetId === 'tab-plugins') renderPluginsTab();
         if (window.innerWidth < 768 && mobileDropdown && !mobileDropdown.classList.contains('hidden')) {
-            mobileDropdown.classList.add('hidden'); mobileDropdown.classList.remove('flex'); mobileIcon.innerText = '▼';
+            mobileDropdown.classList.add('hidden'); mobileDropdown.classList.remove('flex'); if (mobileIcon) mobileIcon.innerText = '▼';
         }
     }));
     if (tabs[0] instanceof HTMLElement) tabs[0].click();
@@ -414,7 +398,7 @@ export async function openCpmSettings() {
                 ? '<span class="text-emerald-400">✓ Bridge 지원됨</span> — ReadableStream 전송 가능.'
                 : '<span class="text-yellow-400">✗ Bridge 미지원</span> — 자동으로 문자열 수집 모드로 폴백됩니다.';
             statusEl.classList.replace('border-gray-600', capable ? 'border-emerald-700' : 'border-yellow-800');
-        } catch (e) { statusEl.innerHTML = `<span class="text-red-400">Bridge 확인 실패:</span> ${escHtml(e.message)}`; }
+        } catch (e) { statusEl.innerHTML = `<span class="text-red-400">Bridge 확인 실패:</span> ${escHtml(/** @type {Error} */ (e).message)}`; }
     })();
 
     // ── Custom Models Manager ──
@@ -430,7 +414,7 @@ export async function openCpmSettings() {
     initExportImport(setVal, openCpmSettings);
 
     // ── Close button ──
-    document.getElementById('cpm-close-btn').addEventListener('click', () => {
+    document.getElementById('cpm-close-btn')?.addEventListener('click', () => {
         document.body.innerHTML = '';
         Risu.hideContainer();
     });

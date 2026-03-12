@@ -1,3 +1,4 @@
+// @ts-check
 /**
  * settings-ui-custom-models.js — Custom Models Manager UI.
  * Extracted from settings-ui.js for modularity.
@@ -9,38 +10,51 @@ import { escHtml } from './helpers.js';
 
 /** @typedef {HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement} FormField */
 
+/** @param {string} id */
 function getElement(id) {
     const el = document.getElementById(id);
     if (!el) throw new Error(`[CPM] Missing element: ${id}`);
     return el;
 }
 
+/** @param {string} id */
 function getField(id) {
     return /** @type {FormField} */ (getElement(id));
 }
 
+/** @param {string} id */
 function getCheckbox(id) {
     return /** @type {HTMLInputElement} */ (getElement(id));
 }
 
+/** @param {string} id */
 function getContainer(id) {
     return /** @type {HTMLElement} */ (getElement(id));
 }
 
+/** @param {string} id */
 function getButton(id) {
     return /** @type {HTMLButtonElement} */ (getElement(id));
 }
 
+/** @param {EventTarget|null} eventTarget */
 function getFileInputFiles(eventTarget) {
     return Array.from((/** @type {HTMLInputElement} */ (eventTarget)).files || []);
 }
 
+/** @param {EventTarget|null} eventTarget */
 function getDatasetIndex(eventTarget) {
     const idx = (/** @type {HTMLElement} */ (eventTarget)).dataset.idx;
     return typeof idx === 'string' ? parseInt(idx, 10) : -1;
 }
 
 // ── Helper: Custom model editor HTML ──
+/**
+ * @param {Array<{value: string, text: string}>} thinkingList
+ * @param {Array<{value: string, text: string}>} reasoningList
+ * @param {Array<{value: string, text: string}>} verbosityList
+ * @param {Array<{value: string, text: string}>} effortList
+ */
 export function renderCustomModelEditor(thinkingList, reasoningList, verbosityList, effortList) {
     return `
         <div id="cpm-cm-editor" class="hidden mt-6 bg-gray-900 border border-gray-700 rounded-lg p-6 relative">
@@ -90,6 +104,7 @@ export function renderCustomModelEditor(thinkingList, reasoningList, verbosityLi
 }
 
 // ── Populate editor from model data ──
+/** @param {Record<string, any>} m */
 export function populateEditor(m) {
     getField('cpm-cm-id').value = m.uniqueId;
     getField('cpm-cm-name').value = m.name || '';
@@ -135,6 +150,7 @@ export function clearEditor() {
 }
 
 // ── Read all editor values into a model object ──
+/** @param {string} uid */
 export function readEditorValues(uid) {
     return {
         uniqueId: uid,
@@ -166,6 +182,10 @@ export function readEditorValues(uid) {
 }
 
 // ── Custom Models Manager logic ──
+/**
+ * @param {any} _setVal
+ * @param {any} _openCpmSettings
+ */
 export function initCustomModelsManager(_setVal, _openCpmSettings) {
     const cmList = getContainer('cpm-cm-list');
     const cmEditor = getContainer('cpm-cm-editor');
@@ -178,10 +198,10 @@ export function initCustomModelsManager(_setVal, _openCpmSettings) {
             cmList.innerHTML = '<div class="text-center text-gray-500 py-4 border border-dashed border-gray-700 rounded">No custom models defined.</div>';
             return;
         }
-        cmList.innerHTML = state.CUSTOM_MODELS_CACHE.map((m, i) => `
+        cmList.innerHTML = state.CUSTOM_MODELS_CACHE.map((/** @type {Record<string, any>} */ m, i) => `
             <div class="bg-gray-800 border border-gray-700 rounded p-4 flex justify-between items-center group hover:border-gray-500 transition-colors">
                 <div>
-                    <div class="font-bold text-white text-lg">${escHtml(m.name) || 'Unnamed Model'}${((m.key || '').trim().split(/\s+/).filter(k => k.length > 0).length > 1) ? ' <span class="text-xs text-blue-400 font-normal ml-2">🔄 키회전</span>' : ''}</div>
+                    <div class="font-bold text-white text-lg">${escHtml(m.name) || 'Unnamed Model'}${((m.key || '').trim().split(/\s+/).filter((/** @type {string} */ k) => k.length > 0).length > 1) ? ' <span class="text-xs text-blue-400 font-normal ml-2">🔄 키회전</span>' : ''}</div>
                     <div class="text-xs text-gray-400 font-mono mt-1">${escHtml(m.model) || 'No model ID'} | ${escHtml(m.url) || 'No URL'}</div>
                 </div>
                 <div class="flex space-x-2 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -195,9 +215,9 @@ export function initCustomModelsManager(_setVal, _openCpmSettings) {
         // Export
         cmList.querySelectorAll('.cpm-cm-export-btn').forEach(btn => btn.addEventListener('click', (e) => {
             const idx = getDatasetIndex(e.target);
-            const m = state.CUSTOM_MODELS_CACHE[idx];
+            const m = /** @type {Record<string, any>} */ (state.CUSTOM_MODELS_CACHE[idx]);
             if (!m) return;
-            const exportModel = { ...m }; delete exportModel.key; exportModel._cpmModelExport = true;
+            const exportModel = /** @type {Record<string, any>} */ ({ ...m }); delete exportModel.key; exportModel._cpmModelExport = true;
             const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(exportModel, null, 2));
             const a = document.createElement('a'); a.href = dataStr;
             a.download = `${(m.name || 'custom_model').replace(/[^a-zA-Z0-9가-힣_-]/g, '_')}.cpm-model.json`;
@@ -267,7 +287,7 @@ export function initCustomModelsManager(_setVal, _openCpmSettings) {
     getButton('cpm-cm-save').addEventListener('click', () => {
         const uid = getField('cpm-cm-id').value;
         const newModel = readEditorValues(uid);
-        const existingIdx = state.CUSTOM_MODELS_CACHE.findIndex(x => x.uniqueId === uid);
+        const existingIdx = state.CUSTOM_MODELS_CACHE.findIndex((/** @type {Record<string, any>} */ x) => x.uniqueId === uid);
         if (existingIdx !== -1) state.CUSTOM_MODELS_CACHE[existingIdx] = { ...state.CUSTOM_MODELS_CACHE[existingIdx], ...newModel };
         else state.CUSTOM_MODELS_CACHE.push(newModel);
         Risu.setArgument('cpm_custom_models', JSON.stringify(state.CUSTOM_MODELS_CACHE));

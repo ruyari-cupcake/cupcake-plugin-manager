@@ -3,7 +3,7 @@
  * Covers: _parseBodyForRisuFetch, _deepSanitizeBody, _stripNonSerializable,
  * _extractResponseBody, _tryCopilotRisuFetch, compatibility mode, all strategies.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // Hoist mocks before imports
 const h = vi.hoisted(() => ({
@@ -96,7 +96,7 @@ describe('smartNativeFetch — internal helpers coverage', () => {
         vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('CORS')));
         h.risuFetch.mockResolvedValue({ status: 200, data: new Uint8Array([123, 125]) });
 
-        const circularObj = {};
+        const _circularObj = {};
         // We can't actually send circular refs, but we test the path by having a normal body
         const body = JSON.stringify({ messages: [{ role: 'user', content: 'test' }] });
 
@@ -175,7 +175,7 @@ describe('smartNativeFetch — internal helpers coverage', () => {
         vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('CORS')));
         h.risuFetch.mockResolvedValue({ status: 200, data: new Uint8Array([123, 125]) });
 
-        const result = await smartNativeFetch('https://api.openai.com/v1/chat', {
+        const _result = await smartNativeFetch('https://api.openai.com/v1/chat', {
             method: 'POST',
             body: JSON.stringify({ messages: [] }),
             headers: {},
@@ -189,7 +189,7 @@ describe('smartNativeFetch — internal helpers coverage', () => {
         vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('CORS')));
         h.risuFetch.mockResolvedValue({ status: 200, data: new Uint8Array([123, 125]) });
 
-        const result = await smartNativeFetch('https://api.openai.com/v1/chat', {
+        const _result = await smartNativeFetch('https://api.openai.com/v1/chat', {
             method: 'POST',
             body: JSON.stringify({ messages: [] }),
             headers: {},
@@ -319,7 +319,7 @@ describe('smartNativeFetch — internal helpers coverage', () => {
         vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('CORS')));
         h.nativeFetch.mockResolvedValue(new Response('ok', { status: 200 }));
 
-        const result = await smartNativeFetch('https://api.openai.com/v1/chat', {
+        const _result = await smartNativeFetch('https://api.openai.com/v1/chat', {
             method: 'POST',
             body: 'form-data',
             headers: { 'Content-Type': 'multipart/form-data' },
@@ -352,7 +352,7 @@ describe('smartNativeFetch — internal helpers coverage', () => {
         });
 
         const ac = new AbortController();
-        const result = await smartNativeFetch('https://api.openai.com/v1/chat', {
+        const _result = await smartNativeFetch('https://api.openai.com/v1/chat', {
             method: 'POST',
             body: JSON.stringify({}),
             headers: {},
@@ -366,7 +366,7 @@ describe('smartNativeFetch — internal helpers coverage', () => {
         h.nativeFetch.mockResolvedValue(new Response('{}', { status: 200 }));
         vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('CORS')));
 
-        const result = await smartNativeFetch('https://aiplatform.googleapis.com/v1/projects/test', {
+        const _result = await smartNativeFetch('https://aiplatform.googleapis.com/v1/projects/test', {
             method: 'POST',
             body: JSON.stringify({}),
         });
@@ -378,7 +378,7 @@ describe('smartNativeFetch — internal helpers coverage', () => {
         h.nativeFetch.mockResolvedValue(new Response('{}', { status: 200 }));
         vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('CORS')));
 
-        const result = await smartNativeFetch('https://oauth2.googleapis.com/token', {
+        const _result = await smartNativeFetch('https://oauth2.googleapis.com/token', {
             method: 'POST',
             body: JSON.stringify({}),
         });
@@ -391,7 +391,7 @@ describe('smartNativeFetch — internal helpers coverage', () => {
         h.risuFetch.mockResolvedValue({ status: 200, data: null });
         h.nativeFetch.mockResolvedValue(new Response('ok', { status: 200 }));
 
-        const result = await smartNativeFetch('https://api.openai.com/v1/chat', {
+        const _result = await smartNativeFetch('https://api.openai.com/v1/chat', {
             method: 'POST',
             body: JSON.stringify({}),
             headers: {},
@@ -404,7 +404,7 @@ describe('smartNativeFetch — internal helpers coverage', () => {
         vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('CORS')));
         h.nativeFetch.mockResolvedValue({ ok: false, status: 0 });
         let callCount = 0;
-        h.risuFetch.mockImplementation(async (url, opts) => {
+        h.risuFetch.mockImplementation(async (_url, _opts) => {
             callCount++;
             if (callCount === 1) {
                 return { status: 524, data: new Uint8Array([123, 125]) };
@@ -615,5 +615,158 @@ describe('smartNativeFetch — internal helpers coverage', () => {
 
         expect(result.status).toBe(200);
         expect(nfCallCount).toBe(2);
+    });
+
+    it('propagates AbortError from direct fetch without trying fallback strategies', async () => {
+        const abortErr = new DOMException('The operation was aborted.', 'AbortError');
+        vi.stubGlobal('fetch', vi.fn().mockRejectedValue(abortErr));
+
+        await expect(
+            smartNativeFetch('https://api.openai.com/v1/chat', {
+                method: 'POST',
+                body: JSON.stringify({ messages: [] }),
+                headers: {},
+            })
+        ).rejects.toThrow('aborted');
+
+        expect(h.risuFetch).not.toHaveBeenCalled();
+        expect(h.nativeFetch).not.toHaveBeenCalled();
+    });
+
+    it('strips non-serializable values from circular object bodies before risuFetch', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('CORS')));
+        let capturedBody = null;
+        h.risuFetch.mockImplementation(async (_url, opts) => {
+            capturedBody = opts.body;
+            return { status: 200, data: new Uint8Array([123, 125]) };
+        });
+
+        const body = { messages: [{ role: 'user', content: 'hello' }], nested: {} };
+        body.self = body;
+        body.fn = () => {};
+        body.nested.parent = body;
+        body.nested.ok = 'kept';
+
+        const result = await smartNativeFetch('https://api.openai.com/v1/chat', {
+            method: 'POST',
+            body,
+            headers: { 'Content-Type': 'application/json' },
+        });
+
+        expect(result.status).toBe(200);
+        expect(capturedBody.messages).toEqual([{ role: 'user', content: 'hello' }]);
+        expect(capturedBody.fn).toBeUndefined();
+        expect(capturedBody.nested.ok).toBe('kept');
+    });
+
+    it('falls back from Copilot risuFetch not-real-response path to nativeFetch', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('CORS')));
+        h.nativeFetch
+            .mockResolvedValueOnce({ ok: false, status: 0 })
+            .mockResolvedValueOnce(new Response('ok', { status: 200 }));
+        h.risuFetch
+            .mockResolvedValueOnce({ status: 0, data: null })
+            .mockResolvedValueOnce({ status: 0, data: null });
+
+        const result = await smartNativeFetch('https://api.githubcopilot.com/chat/completions', {
+            method: 'POST',
+            body: JSON.stringify({ messages: [] }),
+            headers: { 'Content-Type': 'application/json' },
+        });
+
+        expect(h.risuFetch).toHaveBeenCalledTimes(2);
+        expect(h.nativeFetch).toHaveBeenCalledTimes(2);
+        expect(result.status).toBe(200);
+    });
+
+    it('returns Copilot GET 404 fallback nativeFetch response after risuFetch attempts', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('CORS')));
+        h.nativeFetch.mockResolvedValue({ ok: false, status: 404 });
+
+        const result = await smartNativeFetch('https://api.githubcopilot.com/chat/completions', {
+            method: 'GET',
+        });
+
+        expect(result.status).toBe(404);
+        expect(h.risuFetch).toHaveBeenCalledTimes(2);
+        expect(h.nativeFetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('falls back from Copilot GET 500 nativeFetch response to risuFetch', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('CORS')));
+        h.nativeFetch.mockResolvedValue({ ok: false, status: 500 });
+        h.risuFetch.mockResolvedValueOnce({ status: 200, data: new Uint8Array([123, 125]) });
+
+        const result = await smartNativeFetch('https://api.githubcopilot.com/chat/completions', {
+            method: 'GET',
+        });
+
+        expect(result.status).toBe(200);
+        expect(h.risuFetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('falls back to nativeFetch when Copilot risuFetch body parsing fails', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('CORS')));
+        h.nativeFetch
+            .mockResolvedValueOnce({ ok: false, status: 0 })
+            .mockResolvedValueOnce(new Response('ok', { status: 200 }));
+
+        const result = await smartNativeFetch('https://api.githubcopilot.com/chat/completions', {
+            method: 'POST',
+            body: '{not-json',
+            headers: { 'Content-Type': 'application/json' },
+        });
+
+        expect(result.status).toBe(200);
+        expect(h.risuFetch).not.toHaveBeenCalled();
+        expect(h.nativeFetch).toHaveBeenCalledTimes(2);
+    });
+
+    it('falls back to nativeFetch when risuFetch returns an unreadable numeric object body', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('CORS')));
+        const broken = new Proxy({ length: 2 }, {
+            get(target, prop, receiver) {
+                if (prop === '0') throw new Error('broken index');
+                return Reflect.get(target, prop, receiver);
+            },
+        });
+        h.risuFetch.mockResolvedValue({ status: 200, data: broken });
+        h.nativeFetch.mockResolvedValue(new Response('ok', { status: 200 }));
+
+        const result = await smartNativeFetch('https://api.openai.com/v1/chat', {
+            method: 'POST',
+            body: JSON.stringify({ messages: [] }),
+            headers: {},
+        });
+
+        expect(result.status).toBe(200);
+        expect(h.nativeFetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('reads content-type from Headers objects for risuFetch eligibility', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('CORS')));
+        h.risuFetch.mockResolvedValue({ status: 200, data: new Uint8Array([123, 125]) });
+
+        const result = await smartNativeFetch('https://api.openai.com/v1/chat', {
+            method: 'POST',
+            body: JSON.stringify({ messages: [] }),
+            headers: new Headers({ 'content-type': 'application/json' }),
+        });
+
+        expect(result.status).toBe(200);
+        expect(h.risuFetch).toHaveBeenCalledTimes(1);
+        expect(h.nativeFetch).not.toHaveBeenCalled();
+    });
+
+    it('caches compatibility mode lookups across calls', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('ok', { status: 200 })));
+        h.safeGetBoolArg.mockResolvedValue(false);
+        h.checkStreamCapability.mockResolvedValue(true);
+
+        await smartNativeFetch('https://api.openai.com/v1/chat', { method: 'POST', body: '{}' });
+        await smartNativeFetch('https://api.openai.com/v1/chat', { method: 'POST', body: '{}' });
+
+        expect(h.safeGetBoolArg).toHaveBeenCalledTimes(1);
+        expect(h.checkStreamCapability).toHaveBeenCalledTimes(1);
     });
 });

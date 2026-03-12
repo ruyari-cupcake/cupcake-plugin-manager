@@ -33,8 +33,10 @@ import { getCopilotStaticHeaders } from './copilot-headers.js';
 import { KeyPool } from './key-pool.js';
 import { updateApiRequest as _updateApiRequest } from './api-request-log.js';
 
+/** @param {number} ms */
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
+/** @param {any} headers */
 function _parseRetryAfterMs(headers) {
     const raw = headers?.get?.('retry-after');
     if (!raw) return 0;
@@ -47,10 +49,20 @@ function _parseRetryAfterMs(headers) {
     return Math.max(0, retryAt - Date.now());
 }
 
+/** @param {number} status */
 function _isRetriableHttpStatus(status) {
     return status === 408 || status === 429 || status >= 500;
 }
 
+/**
+ * @param {Record<string, any>} config
+ * @param {any[]} messagesRaw
+ * @param {number} temp
+ * @param {number} maxTokens
+ * @param {Record<string, any>} [args]
+ * @param {AbortSignal} [abortSignal]
+ * @param {string} [_reqId]
+ */
 export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {}, abortSignal, _reqId) {
     if (!config.url || !config.url.trim()) {
         return { success: false, content: '[Cupcake PM] Base URL is required. Configure it in PM settings.' };
@@ -78,7 +90,7 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
     }
 
     const _rawKeys = (config.key || '').trim();
-    const _allKeys = _rawKeys.split(/\s+/).filter(k => k.length > 0);
+    const _allKeys = _rawKeys.split(/\s+/).filter((/** @type {string} */ k) => k.length > 0);
     const _useKeyRotation = _allKeys.length > 1;
     const _keyPool = [..._allKeys];
 
@@ -103,7 +115,7 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
     /** @type {any} */
     const body = { model: config.model, temperature: temp };
 
-    const _needsMCT = (model) => { if (!model) return false; return /(?:^|\/)(?:gpt-(?:4\.5|5)|o[1-9])/i.test(model); };
+    const _needsMCT = (/** @type {string} */ model) => { if (!model) return false; return /(?:^|\/)(?:gpt-(?:4\.5|5)|o[1-9])/i.test(model); };
     if (format === 'openai' && _needsMCT(config.model)) {
         body.max_completion_tokens = maxTokens;
     } else {
@@ -180,9 +192,9 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
 
     // ── Final safety: deep-clone + filter ──
     if (body.messages) {
-        try { body.messages = JSON.parse(JSON.stringify(body.messages)); } catch (e) { console.error('[Cupcake PM] Deep-clone of messages failed:', e.message); }
+        try { body.messages = JSON.parse(JSON.stringify(body.messages)); } catch (e) { console.error('[Cupcake PM] Deep-clone of messages failed:', /** @type {Error} */ (e).message); }
         const before = body.messages.length;
-        body.messages = body.messages.filter(m => {
+        body.messages = body.messages.filter((/** @type {any} */ m) => {
             if (m == null || typeof m !== 'object') return false;
             if (!hasNonEmptyMessageContent(m.content) && !hasAttachedMultimodals(m)) return false;
             if (typeof m.role !== 'string' || !m.role) return false;
@@ -192,9 +204,9 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
         if (body.messages.length === 0) return { success: false, content: '[Cupcake PM] messages must be non-empty (all messages became empty after sanitization)' };
     }
     if (body.contents) {
-        try { body.contents = JSON.parse(JSON.stringify(body.contents)); } catch (e) { console.error('[Cupcake PM] ⚠️ Deep-clone of contents failed:', e.message); }
+        try { body.contents = JSON.parse(JSON.stringify(body.contents)); } catch (e) { console.error('[Cupcake PM] ⚠️ Deep-clone of contents failed:', /** @type {Error} */ (e).message); }
         const before = body.contents.length;
-        body.contents = body.contents.filter(m => m != null && typeof m === 'object');
+        body.contents = body.contents.filter((/** @type {any} */ m) => m != null && typeof m === 'object');
         if (body.contents.length < before) console.warn(`[Cupcake PM] ⚠️ Removed ${before - body.contents.length} null/invalid entries from contents array`);
     }
 
@@ -231,9 +243,46 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
     if (config.customParams && config.customParams.trim() !== '') {
         try {
             const extra = JSON.parse(config.customParams);
-            if (typeof extra === 'object' && extra !== null) {
+            if (typeof extra === 'object' && extra !== null && !Array.isArray(extra)) {
                 const safeExtra = { ...extra };
-                delete safeExtra.messages; delete safeExtra.contents; delete safeExtra.stream;
+
+                // ── Blocklist: structural/security-critical fields that must not be overridden via customParams ──
+                // These fields control conversation content, streaming behaviour, model identity, or tool definitions.
+                // Allowing them to be overridden could silently break the request or create security issues.
+                /** @type {string[]} */
+                const BLOCKED_FIELDS = [
+                    // conversation content — replacing these would discard the user's actual chat
+                    'messages', 'contents', 'input', 'prompt',
+                    // streaming control — CPM sets this based on caller intent; override would break the SSE parser
+                    'stream', 'stream_options',
+                    // model identity — the model is chosen in the provider tab UI; overriding here is almost always a mistake
+                    'model',
+                    // tool / function injection — could execute arbitrary tool definitions the user didn't intend
+                    'tools', 'functions', 'function_call', 'tool_choice', 'tool_config',
+                    // system-level overrides
+                    'system', 'system_instruction',
+                ];
+                /** @type {string[]} */
+                const stripped = [];
+                for (const key of BLOCKED_FIELDS) {
+                    if (key in safeExtra) {
+                        stripped.push(key);
+                        delete safeExtra[key];
+                    }
+                }
+                if (stripped.length > 0) {
+                    console.warn(`[Cupcake PM] customParams: blocked field(s) stripped: ${stripped.join(', ')}. Use the main UI settings instead.`);
+                }
+
+                // ── Type guard: only merge primitive values and plain objects/arrays ──
+                for (const [key, value] of Object.entries(safeExtra)) {
+                    if (value !== null && typeof value === 'object' && typeof value.then === 'function') {
+                        // Reject thenables (Promise-like objects) — not valid JSON values
+                        delete safeExtra[key];
+                        console.warn(`[Cupcake PM] customParams: rejected non-serializable value for key "${key}"`);
+                    }
+                }
+
                 Object.assign(body, safeExtra);
             }
         } catch (e) { console.error('[Cupcake PM] Failed to parse customParams JSON for Custom Model:', e); }
@@ -264,7 +313,10 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
         if (body.messages) {
             // Response API does not accept 'name' field on input items (e.g. example_assistant, example_user).
             // Sending it causes 400: "Unknown parameter: 'input[N].name'"
-            body.input = body.messages.map(({ name: _name, ...rest }) => rest);
+            body.input = body.messages.map((/** @type {any} */ msg) => {
+                const { name: _name, ...rest } = msg;
+                return rest;
+            });
             delete body.messages;
         }
         if (body.max_completion_tokens) { body.max_output_tokens = body.max_completion_tokens; delete body.max_completion_tokens; }
@@ -283,15 +335,15 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
     const _isResponsesEndpoint = _useResponsesAPI || (effectiveUrl && /\/responses(?:\?|$)/.test(effectiveUrl));
 
     // ── Core fetch logic (wrapped for key rotation) ──
-    const _doCustomFetch = async (_apiKey) => {
-        const _parseNonStreamingData = (data) => {
+    const _doCustomFetch = async (/** @type {string} */ _apiKey) => {
+        const _parseNonStreamingData = (/** @type {any} */ data) => {
             if (format === 'anthropic') return parseClaudeNonStreamingResponse(data, {}, _reqId);
             if (format === 'google') return parseGeminiNonStreamingResponse(data, config, _reqId);
             if (_isResponsesEndpoint) return parseResponsesAPINonStreamingResponse(data, _reqId);
             return parseOpenAINonStreamingResponse(data, _reqId);
         };
 
-        const _executeRequest = async (requestFactory, label, maxAttempts = 3) => {
+        const _executeRequest = async (/** @type {() => Promise<any>} */ requestFactory, /** @type {string} */ label, maxAttempts = 3) => {
             let attempt = 0;
             let response;
 
@@ -314,16 +366,17 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
             return response;
         };
 
-        const _toNonStreamingUrl = (urlValue) => {
+        const _toNonStreamingUrl = (/** @type {string} */ urlValue) => {
             let nextUrl = String(urlValue || effectiveUrl || '');
             if (format === 'google') {
                 nextUrl = nextUrl.replace(':streamGenerateContent', ':generateContent');
-                nextUrl = nextUrl.replace(/([?&])alt=sse(&)?/i, (_m, sep, tail) => (tail ? sep : ''));
+                nextUrl = nextUrl.replace(/([?&])alt=sse(&)?/i, (/** @type {string} */ _m, /** @type {string} */ sep, /** @type {string} */ tail) => (tail ? sep : ''));
                 nextUrl = nextUrl.replace(/\?&/, '?').replace(/[?&]$/, '');
             }
             return nextUrl;
         };
 
+        /** @type {Record<string, string>} */
         const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${_apiKey}` };
         /** @type {Window & typeof globalThis & { _cpmCopilotMachineId?: string, _cpmCopilotSessionId?: string }} */
         const _win = /** @type {any} */ (window);
@@ -355,8 +408,8 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
             if (format === 'anthropic') headers['anthropic-version'] = '2023-06-01';
 
             const _visionMsgArr = body.messages || body.input || [];
-            const hasVisionContent = _visionMsgArr.some(m =>
-                Array.isArray(m?.content) && m.content.some(p => p.type === 'image_url' || p.type === 'image')
+            const hasVisionContent = _visionMsgArr.some((/** @type {any} */ m) =>
+                Array.isArray(m?.content) && m.content.some((/** @type {any} */ p) => p.type === 'image_url' || p.type === 'image')
             );
             if (hasVisionContent) headers['Copilot-Vision-Request'] = 'true';
         }
@@ -457,7 +510,7 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
             } else if (format === 'google') {
                 config._tokenUsageReqId = _reqId;
                 const _onComplete = () => saveThoughtSignatureFromStream(config, _reqId);
-                return { success: true, content: createSSEStream(res, (line) => parseGeminiSSELine(line, config), abortSignal, _onComplete, _reqId) };
+                return { success: true, content: createSSEStream(res, (/** @type {string} */ line) => parseGeminiSSELine(line, config), abortSignal, _onComplete, _reqId) };
             } else if (_isResponsesEndpoint) {
                 return { success: true, content: createResponsesAPISSEStream(res, abortSignal, _reqId) };
             } else {
@@ -504,7 +557,7 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
     // ── Key Rotation dispatch ──
     if (_useKeyRotation) {
         const _rotationPoolName = `_cpm_custom_inline_${config.model || 'unknown'}`;
-        KeyPool._pools[_rotationPoolName] = { lastRaw: _rawKeys, keys: [..._keyPool], _inline: true };
+        /** @type {Record<string, any>} */ (KeyPool._pools)[_rotationPoolName] = { lastRaw: _rawKeys, keys: [..._keyPool], _inline: true };
         return KeyPool.withRotation(_rotationPoolName, _doCustomFetch);
     }
     return _doCustomFetch(_allKeys[0] || '');

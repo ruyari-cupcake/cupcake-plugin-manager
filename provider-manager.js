@@ -1,7 +1,7 @@
 //@name Cupcake_Provider_Manager
 //@display-name Cupcake Provider Manager
 //@api 3.0
-//@version 1.19.14
+//@version 1.19.17
 //@update-url https://cupcake-plugin-manager-test.vercel.app/api/main-plugin
 
 // ==========================================
@@ -128,7 +128,7 @@ var CupcakeProviderManager = (function (exports) {
     /** @typedef {Window & typeof globalThis & { risuai?: any, Risuai?: any }} RisuWindow */
 
     // ─── Constants ───
-    const CPM_VERSION = '1.19.14';
+    const CPM_VERSION = '1.19.17';
 
     // ─── RisuAI Global Reference ───
     const risuWindow = typeof window !== 'undefined'
@@ -4098,9 +4098,10 @@ var CupcakeProviderManager = (function (exports) {
         },
 
         compareVersions(a, b) {
-            if (!a || !b) return 0;
-            const pa = a.replace(/[^0-9.]/g, '').split('.').map(Number);
-            const pb = b.replace(/[^0-9.]/g, '').split('.').map(Number);
+            const sa = (a || '0.0.0').replace(/[^0-9.]/g, '') || '0.0.0';
+            const sb = (b || '0.0.0').replace(/[^0-9.]/g, '') || '0.0.0';
+            const pa = sa.split('.').map(Number);
+            const pb = sb.split('.').map(Number);
             for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
                 const na = pa[i] || 0, nb = pb[i] || 0;
                 if (nb > na) return 1;
@@ -4115,7 +4116,149 @@ var CupcakeProviderManager = (function (exports) {
         _VERSION_CHECK_COOLDOWN: 600000,
         _VERSION_CHECK_STORAGE_KEY: 'cpm_last_version_check',
         _MAIN_VERSION_CHECK_STORAGE_KEY: 'cpm_last_main_version_check',
+        _MAIN_UPDATE_RETRY_STORAGE_KEY: 'cpm_pending_main_update',
+        _MAIN_UPDATE_RETRY_COOLDOWN: 300000,
+        _MAIN_UPDATE_RETRY_MAX_ATTEMPTS: 2,
+        _mainUpdateInFlight: null,
         _pendingUpdateNames: [],
+
+        async _readPendingMainUpdate() {
+            try {
+                const raw = await Risu.pluginStorage.getItem(this._MAIN_UPDATE_RETRY_STORAGE_KEY);
+                if (!raw) return null;
+                const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+                if (!parsed || typeof parsed !== 'object') {
+                    await this._clearPendingMainUpdate();
+                    return null;
+                }
+                const version = String(parsed.version || '').trim();
+                if (!version) {
+                    await this._clearPendingMainUpdate();
+                    return null;
+                }
+                return {
+                    version,
+                    changes: typeof parsed.changes === 'string' ? parsed.changes : '',
+                    createdAt: Number(parsed.createdAt) || 0,
+                    attempts: Number(parsed.attempts) || 0,
+                    lastAttemptTs: Number(parsed.lastAttemptTs) || 0,
+                    lastError: typeof parsed.lastError === 'string' ? parsed.lastError : '',
+                };
+            } catch (e) {
+                console.warn('[CPM Retry] Failed to read pending main update marker:', e.message || e);
+                try { await this._clearPendingMainUpdate(); } catch (_) { }
+                return null;
+            }
+        },
+
+        async _writePendingMainUpdate(data) {
+            try {
+                await Risu.pluginStorage.setItem(this._MAIN_UPDATE_RETRY_STORAGE_KEY, JSON.stringify(data));
+            } catch (e) {
+                console.warn('[CPM Retry] Failed to write pending main update marker:', e.message || e);
+            }
+        },
+
+        async _clearPendingMainUpdate() {
+            try {
+                if (typeof Risu.pluginStorage.removeItem === 'function') {
+                    await Risu.pluginStorage.removeItem(this._MAIN_UPDATE_RETRY_STORAGE_KEY);
+                } else {
+                    await Risu.pluginStorage.setItem(this._MAIN_UPDATE_RETRY_STORAGE_KEY, '');
+                }
+            } catch (e) {
+                console.warn('[CPM Retry] Failed to clear pending main update marker:', e.message || e);
+            }
+        },
+
+        async _rememberPendingMainUpdate(remoteVersion, changes) {
+            const version = String(remoteVersion || '').trim();
+            if (!version) return;
+            const existing = await this._readPendingMainUpdate();
+            const sameVersion = existing && existing.version === version;
+            await this._writePendingMainUpdate({
+                version,
+                changes: typeof changes === 'string' ? changes : (existing?.changes || ''),
+                createdAt: sameVersion ? (existing.createdAt || Date.now()) : Date.now(),
+                attempts: sameVersion ? (existing.attempts || 0) : 0,
+                lastAttemptTs: sameVersion ? (existing.lastAttemptTs || 0) : 0,
+                lastError: sameVersion ? (existing.lastError || '') : '',
+            });
+        },
+
+        _isRetriableMainUpdateError(error) {
+            const msg = String(error || '').toLowerCase();
+            if (!msg) return true;
+            const nonRetriablePatterns = [
+                '이름 불일치',
+                '버전 불일치',
+                'api 버전이 3.0이 아닙니다',
+                '다운그레이드 차단',
+                '이미 같은 버전입니다',
+                '플러그인을 db에서 찾을 수 없습니다',
+                '플러그인 목록을 찾을 수 없습니다',
+            ];
+            return !nonRetriablePatterns.some(pattern => msg.includes(pattern.toLowerCase()));
+        },
+
+        async _getInstalledMainPluginVersion() {
+            try {
+                const db = await Risu.getDatabase();
+                const plugin = db?.plugins?.find?.(p => p?.name === 'Cupcake_Provider_Manager');
+                return String(plugin?.versionOfPlugin || CPM_VERSION || '').trim();
+            } catch (_) {
+                return String(CPM_VERSION).trim();
+            }
+        },
+
+        async retryPendingMainPluginUpdateOnBoot() {
+            try {
+                const pending = await this._readPendingMainUpdate();
+                if (!pending) return false;
+
+                const installedVersion = await this._getInstalledMainPluginVersion();
+                if (installedVersion && this.compareVersions(installedVersion, pending.version) <= 0) {
+                    console.log(`[CPM Retry] Pending main update already satisfied (${installedVersion} >= ${pending.version}). Clearing marker.`);
+                    await this._clearPendingMainUpdate();
+                    return true;
+                }
+
+                if (pending.attempts >= this._MAIN_UPDATE_RETRY_MAX_ATTEMPTS) {
+                    console.warn(`[CPM Retry] Pending main update exceeded max attempts (${pending.attempts}/${this._MAIN_UPDATE_RETRY_MAX_ATTEMPTS}). Clearing marker.`);
+                    await this._clearPendingMainUpdate();
+                    return false;
+                }
+
+                const elapsed = Date.now() - (pending.lastAttemptTs || 0);
+                if (pending.lastAttemptTs && elapsed < this._MAIN_UPDATE_RETRY_COOLDOWN) {
+                    console.log(`[CPM Retry] Pending main update cooldown active (${Math.ceil((this._MAIN_UPDATE_RETRY_COOLDOWN - elapsed) / 1000)}s left).`);
+                    return false;
+                }
+
+                await this._writePendingMainUpdate({
+                    ...pending,
+                    attempts: (pending.attempts || 0) + 1,
+                    lastAttemptTs: Date.now(),
+                    lastError: '',
+                });
+
+                console.log(`[CPM Retry] Retrying pending main update on boot: ${installedVersion || 'unknown'} → ${pending.version}`);
+                const result = await this.safeMainPluginUpdate(pending.version, pending.changes || '');
+                if (!result.ok) {
+                    const latest = await this._readPendingMainUpdate();
+                    if (latest) {
+                        await this._writePendingMainUpdate({
+                            ...latest,
+                            lastError: String(result.error || ''),
+                        });
+                    }
+                }
+                return true;
+            } catch (e) {
+                console.warn('[CPM Retry] Pending main update retry failed:', e.message || e);
+                return false;
+            }
+        },
 
         async checkVersionsQuiet() {
             try {
@@ -4200,6 +4343,7 @@ var CupcakeProviderManager = (function (exports) {
                 if (mainUpdateInfo) {
                     const delay = updatesAvailable.length > 0 ? 1500 : 0;
                     setTimeout(async () => {
+                            try { await this._rememberPendingMainUpdate(mainUpdateInfo.remoteVersion, mainUpdateInfo.changes); } catch (_) { }
                         try { await this.safeMainPluginUpdate(mainUpdateInfo.remoteVersion, mainUpdateInfo.changes); } catch (_) { }
                     }, delay);
                 }
@@ -4299,7 +4443,10 @@ var CupcakeProviderManager = (function (exports) {
                         console.warn(`[CPM MainAutoCheck] nativeFetch failed (HTTP ${response.status}), skipped.`);
                         return;
                     }
-                    code = await response.text();
+                    code = await Promise.race([
+                        response.text(),
+                        new Promise((_, reject) => setTimeout(() => reject(new Error('nativeFetch body read timed out (20s)')), 20000)),
+                    ]);
                     console.log(`[CPM MainAutoCheck] nativeFetch OK (${(code.length / 1024).toFixed(1)}KB)`);
                 } catch (nativeErr) {
                     console.warn(`[CPM MainAutoCheck] nativeFetch failed: ${nativeErr.message || nativeErr}, trying risuFetch...`);
@@ -4332,6 +4479,7 @@ var CupcakeProviderManager = (function (exports) {
 
                 if (cmp > 0) {
                     console.log(`[CPM MainAutoCheck] Main update available: ${localVersion}→${remoteVersion}`);
+                    try { await this._rememberPendingMainUpdate(remoteVersion, changes); } catch (_) { }
                     // Code already downloaded from version check — validate and install directly (no double download)
                     const installResult = await this._validateAndInstallMainPlugin(code, remoteVersion, changes);
                     if (!installResult.ok) {
@@ -4361,7 +4509,7 @@ var CupcakeProviderManager = (function (exports) {
             // This avoids static-file drift where provider-manager.js can be stale
             // while api/versions already advertises a newer main plugin version.
             try {
-                const bundleUrl = this.UPDATE_BUNDLE_URL + '?_t=' + Date.now() + '_r=' + Math.random().toString(36).substr(2, 6);
+                const bundleUrl = this.UPDATE_BUNDLE_URL + '?_t=' + Date.now() + '&_r=' + Math.random().toString(36).substr(2, 6);
                 console.log(`${LOG} Trying update bundle first: ${bundleUrl}`);
                 const bundleResult = await Promise.race([
                     Risu.risuFetch(bundleUrl, { method: 'GET', plainFetchForce: true }),
@@ -4389,16 +4537,17 @@ var CupcakeProviderManager = (function (exports) {
                     if (!bundledCode || typeof bundledCode !== 'string') {
                         throw new Error(`main plugin code missing in update bundle (${fileName})`);
                     }
-                    if (mainEntry.sha256) {
-                        const actualHash = await _computeSHA256(bundledCode);
-                        if (!actualHash) {
-                            throw new Error('SHA-256 computation failed for bundled main plugin code');
-                        }
-                        if (actualHash !== mainEntry.sha256) {
-                            throw new Error(`bundle sha256 mismatch: expected ${mainEntry.sha256.substring(0, 12)}…, got ${actualHash.substring(0, 12)}…`);
-                        }
-                        console.log(`${LOG} Bundle integrity OK [sha256:${mainEntry.sha256.substring(0, 12)}…]`);
+                    if (!mainEntry.sha256) {
+                        throw new Error('main plugin bundle entry has no sha256 hash — refusing untrusted update');
                     }
+                    const actualHash = await _computeSHA256(bundledCode);
+                    if (!actualHash) {
+                        throw new Error('SHA-256 computation failed for bundled main plugin code');
+                    }
+                    if (actualHash !== mainEntry.sha256) {
+                        throw new Error(`bundle sha256 mismatch: expected ${mainEntry.sha256.substring(0, 12)}…, got ${actualHash.substring(0, 12)}…`);
+                    }
+                    console.log(`${LOG} Bundle integrity OK [sha256:${mainEntry.sha256.substring(0, 12)}…]`);
 
                     console.log(`${LOG} Bundle download OK: ${fileName} v${mainEntry.version} (${(bundledCode.length / 1024).toFixed(1)}KB)`);
                     return { ok: true, code: bundledCode };
@@ -4411,19 +4560,25 @@ var CupcakeProviderManager = (function (exports) {
             for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
                 try {
                     console.log(`${LOG} Attempt ${attempt}/${MAX_RETRIES}: ${url}`);
-                    const cacheBuster = url + '?_t=' + Date.now() + '_r=' + Math.random().toString(36).substr(2, 6);
+                    const cacheBuster = url + '?_t=' + Date.now() + '&_r=' + Math.random().toString(36).substr(2, 6);
 
                     // Prefer nativeFetch (standard Response) for Content-Length access
                     let response;
                     try {
-                        response = await Risu.nativeFetch(cacheBuster, { method: 'GET' });
+                        response = await Promise.race([
+                            Risu.nativeFetch(cacheBuster, { method: 'GET' }),
+                            new Promise((_, reject) => setTimeout(() => reject(new Error('nativeFetch timed out (20s)')), 20000)),
+                        ]);
                     } catch (nativeErr) {
                         console.warn(`${LOG} nativeFetch failed, falling back to risuFetch:`, nativeErr.message || nativeErr);
-                        const result = await Risu.risuFetch(cacheBuster, { method: 'GET', plainFetchForce: true });
-                        if (!result.data || (result.status && result.status >= 400)) {
-                            throw new Error(`risuFetch failed with status ${result.status}`);
+                        const risuResult = await Promise.race([
+                            Risu.risuFetch(cacheBuster, { method: 'GET', plainFetchForce: true }),
+                            new Promise((_, reject) => setTimeout(() => reject(new Error('risuFetch fallback timed out (20s)')), 20000)),
+                        ]);
+                        if (!risuResult.data || (risuResult.status && risuResult.status >= 400)) {
+                            throw new Error(`risuFetch failed with status ${risuResult.status}`);
                         }
-                        const code = typeof result.data === 'string' ? result.data : String(result.data || '');
+                        const code = typeof risuResult.data === 'string' ? risuResult.data : String(risuResult.data || '');
                         // risuFetch doesn't give us Content-Length, skip CL check
                         return { ok: true, code };
                     }
@@ -4432,7 +4587,10 @@ var CupcakeProviderManager = (function (exports) {
                         throw new Error(`HTTP ${response.status}`);
                     }
 
-                    const text = await response.text();
+                    const text = await Promise.race([
+                        response.text(),
+                        new Promise((_, reject) => setTimeout(() => reject(new Error('response body read timed out (20s)')), 20000)),
+                    ]);
 
                     // Content-Length integrity check
                     const contentLength = parseInt(response.headers?.get?.('content-length') || '0', 10);
@@ -4492,15 +4650,19 @@ var CupcakeProviderManager = (function (exports) {
             const parsedCustomLink = [];
 
             for (const line of lines) {
-                if (line.startsWith('//@name')) parsedName = line.slice(7).trim();
-                if (line.startsWith('//@display-name')) parsedDisplayName = line.slice('//@display-name'.length + 1).trim();
-                if (line.startsWith('//@version')) parsedVersion = line.split(' ').slice(1).join(' ').trim();
-                if (line.startsWith('//@update-url')) parsedUpdateURL = line.split(' ')[1] || '';
-                if (line.startsWith('//@api')) {
-                    const vers = line.slice(6).trim().split(' ');
+                const nameMatch = line.match(/^\/\/@name\s+(.+)/);
+                if (nameMatch) parsedName = nameMatch[1].trim();
+                const displayMatch = line.match(/^\/\/@display-name\s+(.+)/);
+                if (displayMatch) parsedDisplayName = displayMatch[1].trim();
+                const verMatch = line.match(/^\/\/@version\s+(.+)/);
+                if (verMatch) parsedVersion = verMatch[1].trim();
+                const urlMatch = line.match(/^\/\/@update-url\s+(\S+)/);
+                if (urlMatch) parsedUpdateURL = urlMatch[1];
+                if (/^\/\/@api\s/.test(line)) {
+                    const vers = line.replace(/^\/\/@api\s+/, '').trim().split(' ');
                     for (const v of vers) { if (['2.0', '2.1', '3.0'].includes(v)) { parsedApiVersion = v; break; } }
                 }
-                if (line.startsWith('//@arg') || line.startsWith('//@risu-arg')) {
+                if (/^\/\/@(?:arg|risu-arg)\s/.test(line)) {
                     const parts = line.trim().split(' ');
                     if (parts.length >= 3) {
                         const key = parts[1];
@@ -4519,7 +4681,7 @@ var CupcakeProviderManager = (function (exports) {
                         }
                     }
                 }
-                if (line.startsWith('//@link')) {
+                if (/^\/\/@link\s/.test(line)) {
                     const link = line.split(' ')[1];
                     if (link && link.startsWith('https')) {
                         const hoverText = line.split(' ').slice(2).join(' ').trim();
@@ -4575,6 +4737,16 @@ var CupcakeProviderManager = (function (exports) {
                 if (installDirection < 0) {
                     return { ok: false, error: `다운그레이드 차단: 현재 ${currentInstalledVersion} > 다운로드 ${parsedVersion}` };
                 }
+
+                // ── Size sanity check: catch truncated downloads ──
+                // The main CPM plugin is normally 300KB+. If the new code is drastically
+                // smaller than the current installation, it's likely a truncated download
+                // that happened to include valid headers but not the actual code body.
+                const existingScriptLen = (existing.script || '').length;
+                if (existingScriptLen > 50000 && code.length < existingScriptLen * 0.3) {
+                    return { ok: false, error: `불완전한 다운로드 의심: 새 코드(${(code.length / 1024).toFixed(1)}KB)가 기존(${(existingScriptLen / 1024).toFixed(1)}KB)의 30% 미만입니다` };
+                }
+
                 const oldRealArg = existing.realArg || {};
 
                 // Merge: keep existing values for matching arg types, add defaults for new args
@@ -4641,6 +4813,15 @@ var CupcakeProviderManager = (function (exports) {
                 console.log(`${LOG} ✓ Successfully applied main plugin update: ${currentInstalledVersion} → ${parsedVersion}`);
                 console.log(`${LOG}   Settings preserved: ${Object.keys(mergedRealArg).length} args (${Object.keys(oldRealArg).length} existed, ${Object.keys(parsedArgs).length} in new version)`);
 
+                // Flag: prevent redundant download in the same session.
+                // After install, CPM_VERSION (compile-time) is stale but the DB
+                // already holds the new version.  checkVersionsQuiet compares
+                // CPM_VERSION vs manifest and would trigger another safeMainPluginUpdate
+                // that wastes bandwidth and shows a confusing "same version" toast.
+                try { /** @type {any} */ (window)._cpmMainUpdateCompletedThisBoot = true; } catch (_) { }
+
+                await this._clearPendingMainUpdate();
+
                 // Show success notification
                 await this._showMainAutoUpdateResult(currentInstalledVersion, parsedVersion, changes || '', true);
 
@@ -4670,18 +4851,58 @@ var CupcakeProviderManager = (function (exports) {
          * @returns {Promise<{ok: boolean, error?: string}>}
          */
         async safeMainPluginUpdate(remoteVersion, changes) {
-            const dl = await this._downloadMainPluginCode(remoteVersion);
-            if (!dl.ok) {
-                console.error(`[CPM SafeUpdate] Download failed: ${dl.error}`);
-                await this._showMainAutoUpdateResult(CPM_VERSION, remoteVersion, changes || '', false, dl.error);
-                return { ok: false, error: dl.error };
+            // If the main plugin was already updated this session (e.g. by boot
+            // retry), skip the redundant download.  CPM_VERSION is a compile-time
+            // constant so callers still think an update is needed, but the DB
+            // already has the new code.
+            if (/** @type {any} */ (window)._cpmMainUpdateCompletedThisBoot) {
+                console.log('[CPM SafeUpdate] Main update already completed this session — skipping.');
+                try { await this._clearPendingMainUpdate(); } catch (_) { }
+                return { ok: true };
             }
-            const result = await this._validateAndInstallMainPlugin(dl.code, remoteVersion, changes);
-            if (!result.ok) {
-                console.error(`[CPM SafeUpdate] Install failed: ${result.error}`);
-                await this._showMainAutoUpdateResult(CPM_VERSION, remoteVersion, changes || '', false, result.error);
+
+            if (this._mainUpdateInFlight) {
+                console.log('[CPM SafeUpdate] Main update already in flight — joining existing run.');
+                return await this._mainUpdateInFlight;
             }
-            return result;
+
+            this._mainUpdateInFlight = (async () => {
+                try {
+                    await this._rememberPendingMainUpdate(remoteVersion, changes);
+
+                    const dl = await this._downloadMainPluginCode(remoteVersion);
+                    if (!dl.ok) {
+                        console.error(`[CPM SafeUpdate] Download failed: ${dl.error}`);
+                        if (!this._isRetriableMainUpdateError(dl.error)) {
+                            await this._clearPendingMainUpdate();
+                        }
+                        await this._showMainAutoUpdateResult(CPM_VERSION, remoteVersion, changes || '', false, dl.error);
+                        return { ok: false, error: dl.error };
+                    }
+                    const result = await this._validateAndInstallMainPlugin(dl.code, remoteVersion, changes);
+                    if (!result.ok) {
+                        console.error(`[CPM SafeUpdate] Install failed: ${result.error}`);
+                        if (!this._isRetriableMainUpdateError(result.error)) {
+                            await this._clearPendingMainUpdate();
+                        }
+                        // "이미 같은 버전" is a no-op, not a real failure — don't alarm the user.
+                        const isSameVersionNoop = result.error && result.error.includes('이미 같은 버전');
+                        if (!isSameVersionNoop) {
+                            await this._showMainAutoUpdateResult(CPM_VERSION, remoteVersion, changes || '', false, result.error);
+                        }
+                    }
+                    return result;
+                } catch (unexpectedErr) {
+                    console.error(`[CPM SafeUpdate] Unexpected error:`, unexpectedErr);
+                    return { ok: false, error: `예기치 않은 오류: ${unexpectedErr.message || unexpectedErr}` };
+                }
+            })();
+
+            try {
+                return await this._mainUpdateInFlight;
+            } finally {
+                this._mainUpdateInFlight = null;
+            }
         },
 
         /**
@@ -4765,7 +4986,7 @@ var CupcakeProviderManager = (function (exports) {
 
         async checkAllUpdates() {
             try {
-                const cacheBuster = this.UPDATE_BUNDLE_URL + '?_t=' + Date.now() + '_r=' + Math.random().toString(36).substr(2, 8);
+                const cacheBuster = this.UPDATE_BUNDLE_URL + '?_t=' + Date.now() + '&_r=' + Math.random().toString(36).substr(2, 8);
                 console.log(`[CPM Update] Fetching update bundle via risuFetch(plainFetchForce): ${cacheBuster}`);
 
                 const result = await Risu.risuFetch(cacheBuster, { method: 'GET', plainFetchForce: true });
@@ -4994,6 +5215,7 @@ var CupcakeProviderManager = (function (exports) {
             'cpm_settings_backup',
             'cpm_last_version_check',
             'cpm_last_main_version_check',
+            'cpm_pending_main_update',
             'cpm_last_boot_status',
         ],
 
@@ -7346,10 +7568,23 @@ var CupcakeProviderManager = (function (exports) {
             }
 
             // ── Phase: Silent Update Check (deferred 5s) ──
-            // Sequential: manifest check first, then JS fallback only if manifest didn't cover main plugin
+            // First, do a one-shot retry only if the previous boot left a pending
+            // main-plugin update marker. This avoids repeated polling / heavy work.
+            // If no pending marker exists, run the normal manifest → JS fallback checks.
             setTimeout(async () => {
+                let retryHandled = false;
+                try {
+                    retryHandled = (typeof SubPluginManager.retryPendingMainPluginUpdateOnBoot === 'function')
+                        ? !!(await SubPluginManager.retryPendingMainPluginUpdateOnBoot())
+                        : false;
+                } catch (_) { }
+                // Sub-plugin version checks always run (checkVersionsQuiet has its own
+                // 10-min cooldown).  Only the main-plugin JS-fallback is skipped when
+                // the boot retry already handled the main update.
                 try { await SubPluginManager.checkVersionsQuiet(); } catch (_) { }
-                try { await SubPluginManager.checkMainPluginVersionQuiet(); } catch (_) { }
+                if (!retryHandled) {
+                    try { await SubPluginManager.checkMainPluginVersionQuiet(); } catch (_) { }
+                }
             }, 5000);
 
             // ── Phase: Keyboard Shortcut + Touch Gesture ──

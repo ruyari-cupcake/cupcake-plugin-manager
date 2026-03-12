@@ -3,7 +3,7 @@
  * Covers: S3 signing paths, signQuery, sessionToken, guessServiceRegion edge cases,
  * hexBodyHash non-string body, encodedPath S3 vs non-S3, buf2hex, encodeRfc3986.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { buf2hex, encodeRfc3986, hmac, hash, guessServiceRegion, AwsV4Signer } from '../src/lib/aws-signer.js';
 
 describe('buf2hex', () => {
@@ -103,7 +103,7 @@ describe('guessServiceRegion', () => {
 
     it('detects us-gov region', () => {
         const url = new URL('https://s3.us-gov.amazonaws.com/bucket');
-        const [service, region] = guessServiceRegion(url, new Headers());
+        const [_service, region] = guessServiceRegion(url, new Headers());
         expect(region).toBe('us-gov-west-1');
     });
 
@@ -116,7 +116,7 @@ describe('guessServiceRegion', () => {
 
     it('detects iot data service', () => {
         const url = new URL('https://data.iot.us-west-2.amazonaws.com/topics/test');
-        const [service, region] = guessServiceRegion(url, new Headers());
+        const [service, _region] = guessServiceRegion(url, new Headers());
         expect(service).toBe('iotdata');
     });
 
@@ -131,7 +131,7 @@ describe('guessServiceRegion', () => {
 
     it('detects iot execute-api', () => {
         const url = new URL('https://iot.us-west-2.amazonaws.com/other');
-        const [service, region] = guessServiceRegion(url, new Headers());
+        const [service, _region] = guessServiceRegion(url, new Headers());
         expect(service).toBe('execute-api');
     });
 
@@ -156,7 +156,7 @@ describe('guessServiceRegion', () => {
         // But actually if there's a bucket subdomain, the regex might parse differently
         // Let's test without the bucket subdomain
         const url = new URL('https://s3-fips-us-east-1.amazonaws.com/bucket/key');
-        const [service, region] = guessServiceRegion(url, new Headers());
+        const [service, _region] = guessServiceRegion(url, new Headers());
         expect(service).toBe('s3');
         // region has fips- stripped
     });
