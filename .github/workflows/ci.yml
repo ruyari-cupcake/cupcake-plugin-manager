@@ -42,6 +42,9 @@ jobs:
           test -f dist/provider-manager.js
           echo "✅ dist/provider-manager.js generated ($(wc -c < dist/provider-manager.js) bytes)"
 
+      - name: Verify release sync
+        run: npm run verify:release-sync
+
       - name: Test + Coverage (threshold gate)
         run: npm run test:coverage
 

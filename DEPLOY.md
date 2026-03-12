@@ -59,20 +59,13 @@ git push test v1.xx.x-test.N
 
 ### 1단계: URL을 프로덕션으로 전환
 
-**변경할 파일 3개, 총 4곳:**
+**변경할 파일은 1개만:**
 
 | 파일 | 변경 내용 |
 |------|-----------|
-| `src/plugin-header.js` (5행) | `cupcake-plugin-manager-test.vercel.app` → `cupcake-plugin-manager.vercel.app` |
-| `src/lib/sub-plugin-manager.js` VERSIONS_URL | `cupcake-plugin-manager-test.vercel.app` → `cupcake-plugin-manager.vercel.app` |
-| `src/lib/sub-plugin-manager.js` MAIN_UPDATE_URL | `cupcake-plugin-manager-test.vercel.app` → `cupcake-plugin-manager.vercel.app` |
-| `src/lib/sub-plugin-manager.js` UPDATE_BUNDLE_URL | `cupcake-plugin-manager-test.vercel.app` → `cupcake-plugin-manager.vercel.app` |
+| `src/cpm-url.config.js` | `CPM_BASE_URL`를 `https://cupcake-plugin-manager.vercel.app`로 변경 |
 
-**테스트 파일 1곳:**
-
-| 파일 | 변경 내용 |
-|------|-----------|
-| `tests/main-plugin-update-regression.test.js` (40행) | `cupcake-plugin-manager-test.vercel.app` → `cupcake-plugin-manager.vercel.app` |
+`src/lib/endpoints.js`, `src/plugin-header.js`, Rollup 배너, 회귀 테스트는 모두 이 값을 기준으로 동기화된다.
 
 ### 2단계: 빌드 & 테스트 & 릴리즈
 
@@ -85,7 +78,7 @@ node scripts/release.cjs        # 권장
 # npm run build
 # copy dist\provider-manager.js provider-manager.js
 # npm test
-# node generate-bundle.cjs
+# node scripts/release.cjs --dry-run
 
 git add -A
 git commit -m "release: provider-manager vX.XX.X"
@@ -96,7 +89,7 @@ git push origin vX.XX.X
 
 ### 3단계: URL을 다시 테스트로 복원
 
-1단계의 역순으로 모든 URL을 `cupcake-plugin-manager-test.vercel.app`으로 되돌린다.
+1단계의 역순으로 [src/cpm-url.config.js](src/cpm-url.config.js)의 `CPM_BASE_URL`만 `https://cupcake-plugin-manager-test.vercel.app`으로 되돌린다.
 
 ```bash
 node scripts/release.cjs
@@ -114,7 +107,8 @@ git push test main
 - 프로덕션 배포 후 반드시 3단계(URL 복원)를 수행한다
 - 메인 자동업데이트 관련 수정 후에는 **소스만 커밋하지 말고 반드시 [node scripts/release.cjs](scripts/release.cjs)로 산출물을 재생성한다**
 - [provider-manager.js](provider-manager.js)와 [update-bundle.json](update-bundle.json)이 stale이면 메인 자동업데이트는 수정 전 코드를 계속 내려보낼 수 있다
-- `origin` push 전에 반드시 전체 테스트(현재 1455개)를 통과시킨다
+- 푸시 전 Husky가 `npm run verify:release-sync`와 `npm run test:release-sync`를 실행하므로, 산출물 버전/해시/번들 코드가 안 맞으면 푸시가 차단된다
+- `origin` push 전에 반드시 전체 테스트를 통과시킨다
 
 ---
 

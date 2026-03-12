@@ -1327,17 +1327,18 @@ When you update a sub-plugin, you must update **4 things**:
 
 ### 16.7 Main Engine (`provider-manager.js`) Updates
 
-The `provider-manager.js` main engine has its own `@update-url` pointing to the Vercel deployment:
+The `provider-manager.js` main engine has its own `@update-url` pointing to the Vercel API endpoint:
 
 ```
-//@update-url https://cupcake-plugin-manager.vercel.app/provider-manager.js
+//@update-url https://cupcake-plugin-manager.vercel.app/api/main-plugin
 ```
 
 This is separate from the sub-plugin update bundle. RisuAI handles main engine updates via its native plugin update mechanism. To update the main engine:
 
-1. Update `@version` **and** `CPM_VERSION` constant in `provider-manager.js`
-2. Ensure the file is deployed to Vercel (via git push)
-3. RisuAI will detect the new version on next plugin update check
+1. Update source version fields (`package.json`, `src/plugin-header.js`, `src/lib/shared-state.js`) and `versions.json`
+2. Run `node scripts/release.cjs` to regenerate `provider-manager.js`, `update-bundle.json`, and `release-hashes.json`
+3. Push the synced artifacts
+4. RisuAI will detect the new version on next plugin update check
 
 ### 16.8 Vercel API Route
 

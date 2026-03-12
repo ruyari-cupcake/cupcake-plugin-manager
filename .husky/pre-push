@@ -1,0 +1,3 @@
+npm run build
+npm run verify:release-sync
+npm run test:release-sync

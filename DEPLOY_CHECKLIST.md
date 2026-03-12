@@ -17,7 +17,7 @@
 | 테스트 / 품질 | `tests/`, `.github/`, `.husky/`, `coverage/` 제외 설정 파일들 |
 | 빌드 / 타입체크 설정 | `package.json`, `package-lock.json`, `rollup.config.mjs`, `eslint.config.js`, `vitest.config.js`, `jsconfig.json`, `tsconfig.typecheck.json`, `.lintstagedrc.json` |
 | 문서 | `README.md`, `PLUGIN_GUIDE.md`, `DEPLOY_CHECKLIST.md` |
-| 배포 산출물 메타 | `versions.json`, `update-bundle.json`, `vercel.json`, 필요 시 `release-hashes.json` |
+| 배포 산출물 메타 | `versions.json`, `update-bundle.json`, `release-hashes.json`, `vercel.json` |
 | 최종 산출물 | `provider-manager.js`, `cpm-*.js` |
 
 핵심 원칙:
@@ -68,7 +68,7 @@
 
 1. `src/`에서 수정
 2. 필요 시 테스트 / 린트 / 타입체크 수행
-3. 배포본이 필요한 변경이면 루트 `provider-manager.js`, `cpm-*.js`, `versions.json`, `update-bundle.json` 동기화
+3. 배포본이 필요한 변경이면 `node scripts/release.cjs`로 루트 `provider-manager.js`, `versions.json`, `update-bundle.json`, `release-hashes.json`까지 동기화
 4. 마이그레이션 전까지는 **소스 원본 보존**을 우선
 
 ---
@@ -82,13 +82,14 @@ git ls-files | sort
 # 2) 로컬 산출물이 추적되지 않는지 확인
 git status --ignored
 
-# 3) 배포 메타데이터가 필요한 경우에만 최신인지 확인
-#    - versions.json
-#    - update-bundle.json
+# 3) release 동기화 검증
+npm run verify:release-sync
 
-# 4) provider-manager.js가 최신 빌드본인지 확인
-#    - 필요 시 root와 dist 해시 비교
+# 4) release 회귀 테스트
+npm run test:release-sync
 ```
+
+추가로, Husky `pre-push` 훅도 같은 검증을 자동 실행한다.
 
 ---
 

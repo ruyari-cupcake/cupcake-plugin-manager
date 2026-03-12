@@ -70,8 +70,10 @@ npm ci            # Install dependencies (lockfile-based, deterministic)
 |---------|-------------|
 | `npm run lint` | ESLint 검사 (src/ + tests/) |
 | `npm run typecheck` | TypeScript 타입 검사 (checkJs, noEmit) |
-| `npm test` | Vitest 테스트 실행 (882개 테스트) |
+| `npm test` | Vitest 전체 테스트 실행 |
+| `npm run test:release-sync` | 배포 산출물 동기화 회귀 테스트 |
 | `npm run test:coverage` | 테스트 커버리지 리포트 |
+| `npm run verify:release-sync` | `package.json`↔배포본↔번들↔해시 메타데이터 동기화 검증 |
 | `npm run build` | Rollup → `dist/provider-manager.js` (IIFE 번들) |
 | `node scripts/release.cjs` | 통합 릴리스: build → dist→root 복사 → 버전 검증 → 번들 생성 → 테스트 → 해시 |
 
@@ -94,9 +96,14 @@ npx vercel --prod   # Production 배포
 - `/api/versions` — 경량 버전 매니페스트 (자동 업데이트 알림용)
 - `/api/update-bundle` — 전체 업데이트 번들 (버전 + 코드)
 
-### Pre-commit Hooks
+### Git Hooks
 
-Husky + lint-staged가 설정되어 있어, 커밋 시 변경된 `.js` 파일에 대해 자동으로 ESLint가 실행됩니다.
+Husky가 설정되어 있어:
+
+- 커밋 시 변경된 `.js` 파일에 대해 ESLint가 실행됩니다.
+- 푸시 전에는 `npm run build` + `npm run verify:release-sync` + `npm run test:release-sync`가 실행됩니다.
+
+즉, 소스만 수정하고 [provider-manager.js](provider-manager.js), [update-bundle.json](update-bundle.json), [release-hashes.json](release-hashes.json), [versions.json](versions.json) 중 하나라도 덜 갱신되면 푸시가 차단됩니다.
 
 ## License
 
