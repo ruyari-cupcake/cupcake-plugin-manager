@@ -2,6 +2,7 @@
  * Deep coverage tests for helpers.js
  * Covers: safeUUID fallback, getSubPluginFileAccept, extractImageUrlFromPart edge cases,
  * all uncovered branches in lines 20-22, 101-109.
+ * @vitest-environment jsdom
  */
 import { describe, it, expect } from 'vitest';
 import {
