@@ -199,10 +199,12 @@ export async function smartNativeFetch(url, options = {}) {
     }
 
     // ─── Copilot-specific: nativeFetch first (GET token exchange + POST/SSE chat) ───
-    // Skipped in compatibility mode for the same reason as Google.
-    // GET is included because the OAuth→API token exchange is a GET request
-    // that also needs nativeFetch (direct browser fetch is blocked by iframe CSP).
-    if (!_compatMode && _isCopilotUrl && Risu && typeof Risu.nativeFetch === 'function') {
+    // Unlike Google, Copilot MUST NOT skip nativeFetch in compatibility mode.
+    // Copilot API does not support CORS, and the /proxy2 endpoint requires
+    // RisuAI JWT auth that plugins don't have. nativeFetch (host-side fetch)
+    // is the ONLY viable path for Copilot. If ReadableStream transfer fails
+    // in compat mode, the response will be caught by error handling below.
+    if (_isCopilotUrl && Risu && typeof Risu.nativeFetch === 'function') {
         try {
             const nfOptions = { ...options };
             if (typeof nfOptions.body === 'string') {

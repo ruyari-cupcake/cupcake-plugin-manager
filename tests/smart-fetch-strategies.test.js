@@ -458,7 +458,8 @@ describe('smartNativeFetch — Compatibility mode (user toggle)', () => {
         expect(mockRisu.risuFetch).toHaveBeenCalledOnce();
     });
 
-    it('skips Copilot nativeFetch and uses risuFetch when compat mode is ON', async () => {
+    it('tries Copilot nativeFetch first even in compat mode, falls back to risuFetch', async () => {
+        // nativeFetch returns undefined (no mock configured) → unusable → falls through
         mockRisu.risuFetch.mockResolvedValue({
             status: 200,
             data: new TextEncoder().encode('{"ok":true}'),
@@ -472,7 +473,8 @@ describe('smartNativeFetch — Compatibility mode (user toggle)', () => {
         });
 
         expect(res.status).toBe(200);
-        expect(mockRisu.nativeFetch).not.toHaveBeenCalled();
+        // Copilot ALWAYS tries nativeFetch (it's the only viable path)
+        expect(mockRisu.nativeFetch).toHaveBeenCalled();
         expect(mockRisu.risuFetch).toHaveBeenCalled();
     });
 
@@ -567,7 +569,8 @@ describe('smartNativeFetch — Compatibility mode (auto-detected via checkStream
         expect(mockRisu.nativeFetch).not.toHaveBeenCalled();
     });
 
-    it('auto-detects compat mode and skips Copilot nativeFetch', async () => {
+    it('auto-detects compat mode but still tries Copilot nativeFetch first', async () => {
+        // nativeFetch returns undefined (no mock configured) → unusable → falls through
         mockRisu.risuFetch.mockResolvedValue({
             status: 200,
             data: new TextEncoder().encode('{"ok":true}'),
@@ -581,7 +584,8 @@ describe('smartNativeFetch — Compatibility mode (auto-detected via checkStream
         });
 
         expect(res.status).toBe(200);
-        expect(mockRisu.nativeFetch).not.toHaveBeenCalled();
+        // Copilot ALWAYS tries nativeFetch regardless of compat mode
+        expect(mockRisu.nativeFetch).toHaveBeenCalled();
         expect(mockRisu.risuFetch).toHaveBeenCalled();
     });
 });

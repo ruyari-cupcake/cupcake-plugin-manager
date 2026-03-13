@@ -3238,16 +3238,21 @@ var CupcakeProviderManager = (function (exports) {
             if (!cleanToken) return '';
 
             console.log('[Cupcake PM] Copilot: Exchanging OAuth token for API token...');
-            // Token exchange headers: only standard CORS-safe headers + Authorization.
-            // Custom headers (Editor-Version, Editor-Plugin-Version, X-GitHub-Api-Version)
-            // trigger CORS preflight that api.github.com rejects, causing the exchange
-            // to fail on browser-based fetch paths (plainFetchForce, direct fetch).
-            // The nativeFetch path (server-side) adds User-Agent automatically.
+            // GitHub API requires User-Agent header (returns 403 without it).
+            // Editor-Version etc. are needed for proper Copilot token exchange.
+            // These headers work fine through nativeFetch (server-side, no CORS)
+            // and through proxy (plainFetchDeforce). On the direct browser fetch
+            // fallback (plainFetchForce), CORS may block them, but that path
+            // already fails for other reasons (Authorization triggers preflight).
             const res = await fetchFn('https://api.github.com/copilot_internal/v2/token', {
                 method: 'GET',
                 headers: {
                     'Accept': 'application/json',
                     'Authorization': `Bearer ${cleanToken}`,
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Code/1.109.2 Chrome/142.0.7444.265 Electron/39.3.0 Safari/537.36',
+                    'Editor-Version': 'vscode/1.109.2',
+                    'Editor-Plugin-Version': 'copilot-chat/0.37.4',
+                    'X-GitHub-Api-Version': '2024-12-15',
                 },
             });
 
@@ -3507,10 +3512,12 @@ var CupcakeProviderManager = (function (exports) {
         }
 
         // ─── Copilot-specific: nativeFetch first (GET token exchange + POST/SSE chat) ───
-        // Skipped in compatibility mode for the same reason as Google.
-        // GET is included because the OAuth→API token exchange is a GET request
-        // that also needs nativeFetch (direct browser fetch is blocked by iframe CSP).
-        if (!_compatMode && _isCopilotUrl && Risu && typeof Risu.nativeFetch === 'function') {
+        // Unlike Google, Copilot MUST NOT skip nativeFetch in compatibility mode.
+        // Copilot API does not support CORS, and the /proxy2 endpoint requires
+        // RisuAI JWT auth that plugins don't have. nativeFetch (host-side fetch)
+        // is the ONLY viable path for Copilot. If ReadableStream transfer fails
+        // in compat mode, the response will be caught by error handling below.
+        if (_isCopilotUrl && Risu && typeof Risu.nativeFetch === 'function') {
             try {
                 const nfOptions = { ...options };
                 if (typeof nfOptions.body === 'string') {
