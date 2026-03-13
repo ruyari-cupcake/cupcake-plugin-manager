@@ -86,6 +86,7 @@ vi.mock('../src/lib/stream-builders.js', () => ({
     createResponsesAPISSEStream: vi.fn(),
     createAnthropicSSEStream: vi.fn(),
     saveThoughtSignatureFromStream: vi.fn(),
+    setApiRequestLogger: vi.fn(),
 }));
 vi.mock('../src/lib/sse-parsers.js', () => ({ parseOpenAISSELine: vi.fn(), parseGeminiSSELine: vi.fn() }));
 vi.mock('../src/lib/response-parsers.js', () => ({

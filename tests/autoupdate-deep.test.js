@@ -371,6 +371,7 @@ describe('_downloadMainPluginCode — direct JS fallback', () => {
     it('falls back to risuFetch when nativeFetch throws (BUG-M2 fix: with timeout)', async () => {
         mockRisuFetch
             .mockResolvedValueOnce({ status: 500, data: '' }) // bundle path
+            .mockResolvedValueOnce({ status: 500, data: '' }) // versions manifest (best-effort SHA fetch)
             .mockResolvedValueOnce({ status: 200, data: VALID_PLUGIN_CODE }); // risuFetch fallback
         mockNativeFetch.mockRejectedValue(new Error('nativeFetch not available'));
 
@@ -378,8 +379,8 @@ describe('_downloadMainPluginCode — direct JS fallback', () => {
 
         expect(result.ok).toBe(true);
         expect(result.code).toBe(VALID_PLUGIN_CODE);
-        // risuFetch called twice: once for bundle, once for fallback
-        expect(mockRisuFetch).toHaveBeenCalledTimes(2);
+        // risuFetch called three times: bundle, versions manifest, fallback
+        expect(mockRisuFetch).toHaveBeenCalledTimes(3);
     });
 
     it('fails when both nativeFetch and risuFetch fail', async () => {
@@ -1620,6 +1621,7 @@ describe('_downloadMainPluginCode — nativeFetch timeout in direct path', () =>
         // Bundle path fails
         mockRisuFetch
             .mockResolvedValueOnce({ status: 500, data: '' })        // bundle path fail
+            .mockResolvedValueOnce({ status: 500, data: '' })        // versions manifest (best-effort SHA fetch)
             .mockResolvedValueOnce({ status: 200, data: VALID_PLUGIN_CODE }); // risuFetch fallback
 
         // nativeFetch hangs forever (never resolves)
@@ -2161,6 +2163,7 @@ describe('_downloadMainPluginCode — SHA-256 computation failure', () => {
 
         mockRisuFetch
             .mockResolvedValueOnce({ status: 200, data: JSON.stringify(bundle) })   // bundle (SHA mismatch)
+            .mockResolvedValueOnce({ status: 500, data: '' })                          // versions manifest (best-effort SHA fetch)
             .mockResolvedValueOnce({ status: 200, data: VALID_PLUGIN_CODE });         // risuFetch fallback
 
         mockNativeFetch.mockRejectedValue(new Error('no nativeFetch'));

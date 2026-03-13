@@ -52,7 +52,15 @@ export function stripStaleAutoCaption(text, message) {
     const imageIntent = lower.includes('image') || lower.includes('photo') || lower.includes('picture') || lower.includes('첨부') || lower.includes('사진');
     if (!imageIntent) return text;
 
-    return text.replace(/\s*\[[a-z0-9][a-z0-9 ,.'"-]{6,}\]\s*$/i, '').trim();
+    return text.replace(/\s*\[[a-z0-9][a-z0-9 ,.'"-]{6,}\]\s*$/i, (match) => {
+        // Only strip if the bracket content looks like an auto-generated image caption.
+        // Captions are typically multi-word descriptions (≥3 alphabetic words).
+        // This avoids stripping structured references like [Chapter 12, Part 2].
+        const inner = match.replace(/^\s*\[/, '').replace(/\]\s*$/, '');
+        const wordCount = (inner.match(/[a-z]{2,}/gi) || []).length;
+        if (wordCount >= 3) return '';
+        return match;   // Too few words to be an image caption — leave it alone
+    }).trim();
 }
 
 /**

@@ -102,7 +102,7 @@ export function initExportImport(/** @type {any} */ setVal, /** @type {any} */ o
                     if (typeof rawText !== 'string') throw new Error('설정 파일 형식이 올바르지 않습니다.');
                     const importedData = JSON.parse(rawText);
                     for (const [key, value] of Object.entries(importedData)) {
-                        setVal(key, value);
+                        await setVal(key, value);
                         /** @type {HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | null} */
                         const el = /** @type {HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | null} */ (document.getElementById(key));
                         if (el) {

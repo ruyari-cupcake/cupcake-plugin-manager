@@ -199,9 +199,11 @@ export function createResponsesAPISSEStream(response, abortSignal, _logRequestId
  * @param {Response} response
  * @param {AbortSignal} [abortSignal]
  * @param {string} [_logRequestId]
+ * @param {{showThinking?: boolean}} [opts]
  * @returns {ReadableStream<string>}
  */
-export function createAnthropicSSEStream(response, abortSignal, _logRequestId) {
+export function createAnthropicSSEStream(response, abortSignal, _logRequestId, opts) {
+    const _showThinking = opts?.showThinking !== false; // default: true (show thinking)
     const reader = /** @type {ReadableStream<Uint8Array>} */ (response.body).getReader();
     const decoder = new TextDecoder();
     let buffer = '';
@@ -217,11 +219,11 @@ export function createAnthropicSSEStream(response, abortSignal, _logRequestId) {
             try {
                 while (true) {
                     if (abortSignal && abortSignal.aborted) {
-                        if (thinking) {
+                        if (thinking && _showThinking) {
                             const closeTag = '</Thoughts>\n\n';
                             try { controller.enqueue(closeTag); _accumulatedContent += closeTag; } catch (_) { /* */ }
-                            thinking = false;
                         }
+                        thinking = false;
                         if (_streamUsage.input_tokens > 0 || _streamUsage.output_tokens > 0) {
                             _setTokenUsage(/** @type {string} */ (_logRequestId), /** @type {any} */ (_normalizeTokenUsage(_streamUsage, 'anthropic', {
                                 anthropicHasThinking: hasThinking,
@@ -235,12 +237,12 @@ export function createAnthropicSSEStream(response, abortSignal, _logRequestId) {
                     }
                     const { done, value } = await reader.read();
                     if (done) {
-                        if (thinking) {
+                        if (thinking && _showThinking) {
                             const closeTag = '</Thoughts>\n\n';
                             controller.enqueue(closeTag);
                             _accumulatedContent += closeTag;
-                            thinking = false;
                         }
+                        thinking = false;
                         if (_streamUsage.input_tokens > 0 || _streamUsage.output_tokens > 0) {
                             _setTokenUsage(/** @type {string} */ (_logRequestId), /** @type {any} */ (_normalizeTokenUsage(_streamUsage, 'anthropic', {
                                 anthropicHasThinking: hasThinking,
@@ -271,16 +273,24 @@ export function createAnthropicSSEStream(response, abortSignal, _logRequestId) {
                                     if (obj.delta?.type === 'thinking' || obj.delta?.type === 'thinking_delta') {
                                         if (obj.delta.thinking) {
                                             hasThinking = true;
-                                            if (!thinking) { thinking = true; deltaText += '<Thoughts>\n'; }
-                                            deltaText += obj.delta.thinking;
+                                            if (_showThinking) {
+                                                if (!thinking) { thinking = true; deltaText += '<Thoughts>\n'; }
+                                                deltaText += obj.delta.thinking;
+                                            } else {
+                                                thinking = true; // track state even when hidden
+                                            }
                                         }
                                     } else if (obj.delta?.type === 'redacted_thinking') {
                                         hasThinking = true;
-                                        if (!thinking) { thinking = true; deltaText += '<Thoughts>\n'; }
-                                        deltaText += '\n{{redacted_thinking}}\n';
+                                        if (_showThinking) {
+                                            if (!thinking) { thinking = true; deltaText += '<Thoughts>\n'; }
+                                            deltaText += '\n{{redacted_thinking}}\n';
+                                        } else {
+                                            thinking = true;
+                                        }
                                     } else if (obj.delta?.type === 'text_delta' || obj.delta?.type === 'text') {
                                         if (obj.delta.text) {
-                                            if (thinking) { thinking = false; deltaText += '</Thoughts>\n\n'; }
+                                            if (thinking) { thinking = false; if (_showThinking) deltaText += '</Thoughts>\n\n'; }
                                             _visibleText += obj.delta.text;
                                             deltaText += obj.delta.text;
                                         }
@@ -289,11 +299,15 @@ export function createAnthropicSSEStream(response, abortSignal, _logRequestId) {
                                 } else if (currentEvent === 'content_block_start') {
                                     if (obj.content_block?.type === 'redacted_thinking') {
                                         hasThinking = true;
-                                        let rt = '';
-                                        if (!thinking) { thinking = true; rt += '<Thoughts>\n'; }
-                                        rt += '\n{{redacted_thinking}}\n';
-                                        controller.enqueue(rt);
-                                        _accumulatedContent += rt;
+                                        if (_showThinking) {
+                                            let rt = '';
+                                            if (!thinking) { thinking = true; rt += '<Thoughts>\n'; }
+                                            rt += '\n{{redacted_thinking}}\n';
+                                            controller.enqueue(rt);
+                                            _accumulatedContent += rt;
+                                        } else {
+                                            thinking = true;
+                                        }
                                     }
                                 } else if (currentEvent === 'error' || obj.type === 'error') {
                                     const errMsg = obj.error?.message || obj.message || 'Unknown stream error';
@@ -314,11 +328,11 @@ export function createAnthropicSSEStream(response, abortSignal, _logRequestId) {
                     }
                 }
             } catch (e) {
-                if (thinking) {
+                if (thinking && _showThinking) {
                     const closeTag = '</Thoughts>\n\n';
                     try { controller.enqueue(closeTag); _accumulatedContent += closeTag; } catch (_) { /* */ }
-                    thinking = false;
                 }
+                thinking = false;
                 if (_streamUsage.input_tokens > 0 || _streamUsage.output_tokens > 0) {
                     _setTokenUsage(/** @type {string} */ (_logRequestId), /** @type {any} */ (_normalizeTokenUsage(_streamUsage, 'anthropic', {
                         anthropicHasThinking: hasThinking,

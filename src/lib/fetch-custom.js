@@ -28,6 +28,7 @@ import {
     parseOpenAINonStreamingResponse, parseResponsesAPINonStreamingResponse,
 } from './response-parsers.js';
 import { smartNativeFetch } from './smart-fetch.js';
+import { checkStreamCapability } from './stream-utils.js';
 import { ensureCopilotApiToken } from './copilot-token.js';
 import { getCopilotStaticHeaders } from './copilot-headers.js';
 import { KeyPool } from './key-pool.js';
@@ -430,7 +431,13 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
         // ── Streaming ──
         const streamingEnabled = await safeGetBoolArg('cpm_streaming_enabled', false);
         const perModelStreamingEnabled = (config.streaming === true) || (config.streaming !== false && !config.decoupled);
-        const useStreaming = streamingEnabled && perModelStreamingEnabled;
+        const _bridgeCapable = await checkStreamCapability();
+        const _compatManual = await safeGetBoolArg('cpm_compatibility_mode', false);
+        const _compatActive = _compatManual || !_bridgeCapable;
+        const useStreaming = streamingEnabled && perModelStreamingEnabled && !_compatActive;
+        if (streamingEnabled && _compatActive) {
+            console.log(`[Cupcake PM] Compatibility mode active — forcing non-streaming to prevent duplicate requests (manual=${_compatManual}, bridge=${_bridgeCapable}).`);
+        }
         if (!useStreaming && effectiveUrl && effectiveUrl.includes('githubcopilot.com')) {
             console.warn(`[Cupcake PM] Copilot request in non-stream mode. Long responses may return 524 via proxy.`);
         }
@@ -506,7 +513,8 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
             if (_reqId) _updateApiRequest(_reqId, { response: '(streaming…)' });
 
             if (format === 'anthropic') {
-                return { success: true, content: createAnthropicSSEStream(res, abortSignal, _reqId) };
+                const _showThinkingInStream = await safeGetBoolArg('cpm_streaming_show_thinking', true);
+                return { success: true, content: createAnthropicSSEStream(res, abortSignal, _reqId, { showThinking: _showThinkingInStream }) };
             } else if (format === 'google') {
                 config._tokenUsageReqId = _reqId;
                 const _onComplete = () => saveThoughtSignatureFromStream(config, _reqId);

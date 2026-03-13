@@ -15,6 +15,7 @@ import {
 import { SettingsBackup } from './settings-backup.js';
 import { SubPluginManager } from './sub-plugin-manager.js';
 import { checkStreamCapability } from './stream-utils.js';
+import { _resetCompatibilityCache } from './smart-fetch.js';
 import { escHtml } from './helpers.js';
 import { renderCustomModelEditor, initCustomModelsManager } from './settings-ui-custom-models.js';
 import { buildPluginsTabRenderer } from './settings-ui-plugins.js';
@@ -55,12 +56,20 @@ export function bindSettingsPersistenceHandlers(/** @type {any} */ root, /** @ty
 
     root.querySelectorAll('input[type="text"], input[type="password"], input[type="number"], select, textarea').forEach((/** @type {any} */ el) => {
         if (!shouldPersistControl(el)) return;
-        el.addEventListener('change', (/** @type {any} */ e) => setVal(e.target.id, e.target.value));
+        el.addEventListener('change', (/** @type {any} */ e) => {
+            Promise.resolve(setVal(e.target.id, e.target.value)).catch(err => {
+                console.error('[CupcakePM] Failed to persist setting:', e.target?.id, err);
+            });
+        });
     });
 
     root.querySelectorAll('input[type="checkbox"]').forEach((/** @type {any} */ el) => {
         if (!shouldPersistControl(el)) return;
-        el.addEventListener('change', (/** @type {any} */ e) => setVal(e.target.id, e.target.checked));
+        el.addEventListener('change', (/** @type {any} */ e) => {
+            Promise.resolve(setVal(e.target.id, e.target.checked)).catch(err => {
+                console.error('[CupcakePM] Failed to persist checkbox setting:', e.target?.id, err);
+            });
+        });
     });
 }
 
@@ -77,10 +86,53 @@ export async function openCpmSettings() {
 
     const getVal = async (/** @type {string} */ k) => await safeGetArg(k);
     const getBoolVal = async (/** @type {string} */ k) => await safeGetBoolArg(k);
-    const setVal = (/** @type {string} */ k, /** @type {any} */ v) => {
-        Risu.setArgument(k, String(v));
+    const setVal = async (/** @type {string} */ k, /** @type {any} */ v) => {
+        await Risu.setArgument(k, String(v));
         SettingsBackup.updateKey(k, String(v));
+        // Invalidate smart-fetch compatibility cache when relevant settings change
+        if (k === 'cpm_compatibility_mode' || k === 'cpm_streaming_enabled') {
+            _resetCompatibilityCache();
+            queueMicrotask(() => {
+                Promise.resolve(refreshStatusIndicators()).catch(err => {
+                    console.error('[CupcakePM] Failed to refresh status indicators:', err);
+                });
+            });
+        }
     };
+
+    async function refreshStatusIndicators() {
+        const statusEl = document.getElementById('cpm-stream-status');
+        const compatStatusEl = document.getElementById('cpm-compat-status');
+
+        try {
+            const capable = await checkStreamCapability();
+            if (statusEl) {
+                statusEl.innerHTML = capable
+                    ? '<span class="text-emerald-400">✓ Bridge 지원됨</span> — ReadableStream 전송 가능.'
+                    : '<span class="text-yellow-400">✗ Bridge 미지원</span> — 자동으로 문자열 수집 모드로 폴백됩니다.';
+                statusEl.classList.remove('border-gray-600', 'border-emerald-700', 'border-yellow-800');
+                statusEl.classList.add(capable ? 'border-emerald-700' : 'border-yellow-800');
+            }
+
+            if (compatStatusEl) {
+                const manualEnabled = await safeGetBoolArg('cpm_compatibility_mode', false);
+                compatStatusEl.classList.remove('border-gray-600', 'border-emerald-700', 'border-amber-700');
+                if (manualEnabled) {
+                    compatStatusEl.innerHTML = '<span class="text-amber-400">⚡ 수동 활성화됨</span> — nativeFetch 건너뛰기 + 스트리밍 자동 비활성화.';
+                    compatStatusEl.classList.add('border-amber-700');
+                } else if (!capable) {
+                    compatStatusEl.innerHTML = '<span class="text-amber-400">⚡ 자동 활성화됨</span> — Bridge가 ReadableStream을 지원하지 않아 자동 적용 (iPhone/Safari 등).';
+                    compatStatusEl.classList.add('border-amber-700');
+                } else {
+                    compatStatusEl.innerHTML = '<span class="text-emerald-400">✓ 비활성</span> — Bridge 정상. 호환성 모드가 필요하지 않습니다.';
+                    compatStatusEl.classList.add('border-emerald-700');
+                }
+            }
+        } catch (e) {
+            if (statusEl) statusEl.innerHTML = `<span class="text-red-400">Bridge 확인 실패:</span> ${escHtml(/** @type {Error} */ (e).message)}`;
+            if (compatStatusEl) compatStatusEl.innerHTML = `<span class="text-red-400">확인 실패:</span> ${escHtml(/** @type {Error} */ (e).message)}`;
+        }
+    }
 
     const escAttr = (/** @type {any} */ s) => String(s ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
@@ -255,6 +307,19 @@ export async function openCpmSettings() {
                     ${await renderInput('cpm_streaming_enabled', '스트리밍 패스스루 활성화 (Enable Streaming Pass-Through)', 'checkbox')}
                     ${await renderInput('cpm_streaming_show_thinking', 'Anthropic Thinking 토큰 표시 (Show Thinking in Stream)', 'checkbox')}
                 </div>
+                <div class="mt-6 pt-4 border-t border-gray-700/50">
+                    <h5 class="text-sm font-bold text-amber-400 mb-3">📱 iPhone/Safari 호환성 모드 (Compatibility Mode)</h5>
+                    <div class="bg-gray-800/70 border border-amber-900/50 rounded-lg p-4 mb-4">
+                        <p class="text-xs text-amber-300 mb-2 font-semibold">🔧 호환성 모드란?</p>
+                        <p class="text-xs text-gray-400 mb-2">iPhone/Safari 등 ReadableStream 전달이 불안정한 환경에서 nativeFetch를 건너뛰고 risuFetch만 사용합니다.</p>
+                        <p class="text-xs text-gray-400 mb-2">또한 <strong class="text-amber-200">스트리밍을 자동으로 비활성화</strong>하여, 응답 본문을 못 받아 요청이 2회 발생하는 문제를 방지합니다.</p>
+                        <p class="text-xs text-yellow-500">⚠️ Bridge가 ReadableStream을 지원하지 않으면 자동으로 활성화됩니다. 수동으로 켜면 항상 적용됩니다.</p>
+                        <div id="cpm-compat-status" class="mt-3 text-xs font-mono px-3 py-2 rounded bg-gray-900 border border-gray-600">호환성 상태: 확인 중...</div>
+                    </div>
+                    <div class="space-y-3">
+                        ${await renderInput('cpm_compatibility_mode', '호환성 모드 강제 활성화 (Force Compatibility Mode)', 'checkbox')}
+                    </div>
+                </div>
             </div>
             <div class="mt-10 pt-6 border-t border-gray-700">
                 <h4 class="text-xl font-bold text-purple-400 mb-4">📊 토큰 사용량 표시 (Token Usage Display)</h4>
@@ -388,18 +453,8 @@ export async function openCpmSettings() {
     }));
     if (tabs[0] instanceof HTMLElement) tabs[0].click();
 
-    // ── Stream capability check ──
-    (async () => {
-        const statusEl = document.getElementById('cpm-stream-status');
-        if (!statusEl) return;
-        try {
-            const capable = await checkStreamCapability();
-            statusEl.innerHTML = capable
-                ? '<span class="text-emerald-400">✓ Bridge 지원됨</span> — ReadableStream 전송 가능.'
-                : '<span class="text-yellow-400">✗ Bridge 미지원</span> — 자동으로 문자열 수집 모드로 폴백됩니다.';
-            statusEl.classList.replace('border-gray-600', capable ? 'border-emerald-700' : 'border-yellow-800');
-        } catch (e) { statusEl.innerHTML = `<span class="text-red-400">Bridge 확인 실패:</span> ${escHtml(/** @type {Error} */ (e).message)}`; }
-    })();
+    // ── Stream / compatibility status check ──
+    await refreshStatusIndicators();
 
     // ── Custom Models Manager ──
     initCustomModelsManager(setVal, openCpmSettings);

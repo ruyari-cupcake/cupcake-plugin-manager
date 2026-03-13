@@ -490,6 +490,25 @@ describe('smartNativeFetch — Compatibility mode (user toggle)', () => {
         expect(mockRisu.nativeFetch).not.toHaveBeenCalled();
     });
 
+    it('Copilot 524 does NOT trigger plainFetchForce retry when compat mode is ON', async () => {
+        mockSafeGetBoolArg.mockResolvedValue(true);
+        mockRisu.nativeFetch.mockResolvedValue({ ok: false, status: 0 });
+        mockRisu.risuFetch.mockResolvedValue({ status: 524, data: 'timeout', headers: {} });
+
+        const res = await smartNativeFetch('https://api.githubcopilot.com/chat/completions', {
+            method: 'POST',
+            body: '{}',
+        });
+
+        // Should return the 524 error response, NOT retry with plainFetchForce
+        expect(res.status).toBe(524);
+        const body = await res.json();
+        expect(body.error.type).toBe('compat_524_blocked');
+        // risuFetch called only ONCE (plainFetchDeforce), no second call
+        expect(mockRisu.risuFetch).toHaveBeenCalledTimes(1);
+        expect(mockRisu.risuFetch.mock.calls[0][1].plainFetchDeforce).toBe(true);
+    });
+
     it('non-Google non-Copilot POST still works via risuFetch in compat mode', async () => {
         mockRisu.risuFetch.mockResolvedValue({
             status: 200,

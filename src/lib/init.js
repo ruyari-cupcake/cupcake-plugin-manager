@@ -37,6 +37,7 @@ import {
 import {
     createSSEStream, createOpenAISSEStream, createResponsesAPISSEStream,
     createAnthropicSSEStream, saveThoughtSignatureFromStream,
+    setApiRequestLogger,
 } from './stream-builders.js';
 import { collectStream, checkStreamCapability } from './stream-utils.js';
 import { ensureCopilotApiToken, setCopilotGetArgFn, setCopilotFetchFn } from './copilot-token.js';
@@ -44,6 +45,7 @@ import { SettingsBackup } from './settings-backup.js';
 import { SubPluginManager, setExposeScopeFunction } from './sub-plugin-manager.js';
 import { fetchCustom } from './fetch-custom.js';
 import { handleRequest, fetchByProviderId } from './router.js';
+import { updateApiRequest } from './api-request-log.js';
 import { setupCupcakeAPI } from './cupcake-api.js';
 import { openCpmSettings } from './settings-ui.js';
 
@@ -104,6 +106,9 @@ setCopilotFetchFn(smartNativeFetch);
 
 // Inject _exposeScopeToWindow into SubPluginManager via DI (avoids circular deps)
 setExposeScopeFunction(_exposeScopeToWindow);
+
+// Wire stream-builders request logger so streaming responses are recorded
+setApiRequestLogger(updateApiRequest);
 
 // ─── Setup window.CupcakePM public API ───
 setupCupcakeAPI();
@@ -181,16 +186,16 @@ setupCupcakeAPI();
             const compatMode = await safeGetBoolArg('cpm_compatibility_mode', false);
 
             if (compatMode) {
-                console.log('[Cupcake PM] 🔧 Compatibility mode: ENABLED (nativeFetch will be skipped — using risuFetch only).');
+                console.log('[Cupcake PM] 🔧 Compatibility mode: ENABLED (nativeFetch will be skipped + streaming forced OFF).');
             } else if (!streamCapable) {
-                console.log('[Cupcake PM] 🔧 Compatibility mode: AUTO-ACTIVE (bridge cannot transfer ReadableStream — nativeFetch will be skipped).');
+                console.log('[Cupcake PM] 🔧 Compatibility mode: AUTO-ACTIVE (bridge cannot transfer ReadableStream — nativeFetch skipped + streaming forced OFF).');
             }
 
             if (streamEnabled) {
-                if (streamCapable) {
+                if (compatMode || !streamCapable) {
+                    console.warn('[Cupcake PM] 🔄 Streaming: enabled in settings but OVERRIDDEN by compatibility mode — non-streaming will be used to prevent duplicate requests.');
+                } else if (streamCapable) {
                     console.log('[Cupcake PM] 🔄 Streaming: enabled AND bridge capable — ReadableStream pass-through active.');
-                } else {
-                    console.warn('[Cupcake PM] 🔄 Streaming: enabled but bridge NOT capable — will fall back to string collection.');
                 }
             } else {
                 console.log(`[Cupcake PM] 🔄 Streaming: disabled (bridge ${streamCapable ? 'capable' : 'not capable'}). Enable in settings to activate.`);
@@ -431,7 +436,7 @@ setupCupcakeAPI();
                             <p style="color:#aaa;">Completed: ${_completedPhases.join(', ') || 'none'}</p>
                             <pre style="background:#0d1117;color:#ff7b72;padding:16px;border-radius:8px;overflow:auto;max-height:300px;font-size:13px;">${String(_errAny && _errAny.stack ? _errAny.stack : _errAny).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>
                             <p style="color:#aaa;margin-top:20px;">Try: reload (Ctrl+Shift+R) or re-import the plugin.</p>
-                            <button onclick="document.body.innerHTML='';Risu.hideContainer();"
+                            <button onclick="document.body.innerHTML='';try{(window.risuai||window.Risuai).hideContainer();}catch(_){}"
                                 style="margin-top:20px;padding:10px 24px;background:#e74c3c;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px;">Close</button>
                         </div>`;
                     },

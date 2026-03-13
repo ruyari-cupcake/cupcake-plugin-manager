@@ -211,7 +211,8 @@ describe('formatToAnthropic', () => {
         const firstMsg = msgs[0];
         if (Array.isArray(firstMsg.content)) {
             const lastBlock = firstMsg.content[firstMsg.content.length - 1];
-            expect(lastBlock.cache_control).toEqual({ type: 'ephemeral', ttl: '1h' });
+            // Anthropic API only supports { type: 'ephemeral' } — custom TTL strings are not supported
+            expect(lastBlock.cache_control).toEqual({ type: 'ephemeral' });
         }
     });
 

@@ -131,6 +131,7 @@ vi.mock('../src/lib/stream-builders.js', () => ({
     createResponsesAPISSEStream: vi.fn(),
     createAnthropicSSEStream: vi.fn(),
     saveThoughtSignatureFromStream: vi.fn(),
+    setApiRequestLogger: vi.fn(),
 }));
 
 vi.mock('../src/lib/stream-utils.js', () => ({

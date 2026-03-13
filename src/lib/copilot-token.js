@@ -5,6 +5,9 @@
  * Uses dependency injection for safeGetArg and fetch to enable testing.
  */
 
+/** Negative cache duration (ms) — prevents rapid-fire retries after failure */
+const _NEGATIVE_CACHE_MS = 60000;
+
 let _copilotTokenCache = { token: '', expiry: 0 };
 let _copilotTokenPromise = /** @type {Promise<string> | null} */ (null);
 
@@ -77,6 +80,8 @@ export async function ensureCopilotApiToken() {
 
         if (!res.ok) {
             console.error(`[Cupcake PM] Copilot token exchange failed (${res.status}): ${await res.text()}`);
+            // Negative cache: avoid retrying the same failed exchange for 60s
+            _copilotTokenCache = { token: '', expiry: Date.now() + _NEGATIVE_CACHE_MS };
             return '';
         }
 
@@ -108,6 +113,8 @@ export async function ensureCopilotApiToken() {
         }
 
         console.error('[Cupcake PM] Copilot token exchange returned no token');
+        // Negative cache: avoid retrying the same failed exchange for 60s
+        _copilotTokenCache = { token: '', expiry: Date.now() + _NEGATIVE_CACHE_MS };
         return '';
     })();
 

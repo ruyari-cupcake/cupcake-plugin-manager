@@ -274,7 +274,8 @@ describe('formatToAnthropic — deep branch coverage', () => {
         const { messages: msgs } = formatToAnthropic(messages, { caching: true, claude1HourCaching: true });
         const userMsg = msgs[0];
         const lastBlock = userMsg.content[userMsg.content.length - 1];
-        expect(lastBlock.cache_control).toEqual({ type: 'ephemeral', ttl: '1h' });
+        // Anthropic API only supports { type: 'ephemeral' } — custom TTL strings are not supported
+        expect(lastBlock.cache_control).toEqual({ type: 'ephemeral' });
     });
 
     // ── input_image with https URL in array content ───
@@ -497,6 +498,7 @@ describe('formatToAnthropic — branch gap coverage', () => {
         // Since ci=1, ci>0 is true, prevRole===curRole → no fmtIdx increment
         const userMsg = msgs[0];
         const lastBlock = userMsg.content[userMsg.content.length - 1];
-        expect(lastBlock.cache_control).toEqual({ type: 'ephemeral', ttl: '1h' });
+        // Anthropic API only supports { type: 'ephemeral' } — custom TTL strings are not supported
+        expect(lastBlock.cache_control).toEqual({ type: 'ephemeral' });
     });
 });

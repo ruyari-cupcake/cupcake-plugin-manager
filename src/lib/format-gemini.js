@@ -43,9 +43,11 @@ export function validateGeminiParams(generationConfig) {
     const rules = [
         { key: 'temperature', min: 0, max: 2, fallback: 1, exclusiveMax: false },
         { key: 'topP', min: 0, max: 1, fallback: undefined, exclusiveMax: false },
-        { key: 'topK', min: 1, max: 40, fallback: undefined, exclusiveMax: false },
-        { key: 'frequencyPenalty', min: -2, max: 2, fallback: undefined, exclusiveMax: true },
-        { key: 'presencePenalty', min: -2, max: 2, fallback: undefined, exclusiveMax: true },
+        // Gemini 2.x+ supports topK up to 64
+        { key: 'topK', min: 1, max: 64, fallback: undefined, exclusiveMax: false },
+        // Boundary value 2.0 is valid (inclusive)
+        { key: 'frequencyPenalty', min: -2, max: 2, fallback: undefined, exclusiveMax: false },
+        { key: 'presencePenalty', min: -2, max: 2, fallback: undefined, exclusiveMax: false },
     ];
     for (const { key, min, max, fallback, exclusiveMax } of rules) {
         if (generationConfig[key] == null) continue;

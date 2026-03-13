@@ -66,10 +66,10 @@ describe('validateGeminiParams', () => {
         expect(config.topK).toBeUndefined();
     });
 
-    it('removes frequencyPenalty at exactMax boundary (exclusive)', () => {
+    it('preserves frequencyPenalty at exactMax boundary (inclusive)', () => {
         const config = { frequencyPenalty: 2 };
         validateGeminiParams(config);
-        expect(config.frequencyPenalty).toBeUndefined();
+        expect(config.frequencyPenalty).toBe(2);
     });
 
     it('preserves frequencyPenalty within range', () => {

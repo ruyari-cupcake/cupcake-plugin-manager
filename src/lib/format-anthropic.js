@@ -153,10 +153,10 @@ export function formatToAnthropic(messages, config = {}) {
     }
 
     // Apply cache_control breakpoints
+    // NOTE: Anthropic cache_control only supports { type: 'ephemeral' } (5-min default TTL).
+    // Custom TTL strings are NOT supported by the API and would be silently ignored or rejected.
     if (config.caching) {
-        const _cacheCtrl = config.claude1HourCaching
-            ? { type: 'ephemeral', ttl: '1h' }
-            : { type: 'ephemeral' };
+        const _cacheCtrl = { type: 'ephemeral' };
         let fmtIdx = 0;
         for (let ci = 0; ci < chatMsgs.length && fmtIdx < formattedMsgs.length; ci++) {
             const srcMsg = chatMsgs[ci];

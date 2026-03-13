@@ -178,7 +178,7 @@ export async function smartNativeFetch(url, options = {}) {
     // ─── Google / Vertex: nativeFetch first for POST/SSE stability ───
     // Skipped in compatibility mode — nativeFetch returns Response(ReadableStream) which
     // fails to transfer across the V3 iframe bridge on Safari < 16.4.
-    if (!_compatMode && _isGoogleApiUrl && (options.method || 'POST') !== 'GET' && typeof Risu.nativeFetch === 'function') {
+    if (!_compatMode && _isGoogleApiUrl && (options.method || 'POST') !== 'GET' && Risu && typeof Risu.nativeFetch === 'function') {
         try {
             const nfOptions = { ...options };
             if (typeof nfOptions.body === 'string') {
@@ -198,7 +198,7 @@ export async function smartNativeFetch(url, options = {}) {
 
     // ─── Copilot-specific: nativeFetch first for POST/SSE ───
     // Skipped in compatibility mode for the same reason as Google.
-    if (!_compatMode && _isCopilotUrl && (options.method || 'POST') !== 'GET' && typeof Risu.nativeFetch === 'function') {
+    if (!_compatMode && _isCopilotUrl && (options.method || 'POST') !== 'GET' && Risu && typeof Risu.nativeFetch === 'function') {
         try {
             const nfOptions = { ...options };
             if (typeof nfOptions.body === 'string') {
@@ -229,7 +229,7 @@ export async function smartNativeFetch(url, options = {}) {
     }
 
     // ─── Copilot risuFetch (plainFetchDeforce) ───
-    if (_isCopilotUrl && typeof Risu.risuFetch === 'function') {
+    if (_isCopilotUrl && Risu && typeof Risu.risuFetch === 'function') {
         const copilotResult = await _tryCopilotRisuFetch(url, options, 'plainFetchDeforce');
         if (copilotResult) return copilotResult;
 
@@ -245,7 +245,7 @@ export async function smartNativeFetch(url, options = {}) {
     )) || '';
     const _isJsonBody = !_contentType || _contentType.includes('application/json');
 
-    if (!_isCopilotUrl && _isJsonBody && typeof Risu.risuFetch === 'function') {
+    if (!_isCopilotUrl && _isJsonBody && Risu && typeof Risu.risuFetch === 'function') {
         try {
             let bodyObj = _parseBodyForRisuFetch(options.body);
             if (bodyObj === undefined && options.body) {
@@ -367,6 +367,11 @@ function _deepSanitizeBody(bodyObj) {
                 /** @type {Record<string, any>} */
                 const safeMsg = { role: _rm.role, content: _rm.content };
                 if (_rm.name && typeof _rm.name === 'string') safeMsg.name = _rm.name;
+                // Preserve tool-calling properties required by OpenAI/Anthropic tool-use flows
+                if (_rm.tool_calls) safeMsg.tool_calls = _rm.tool_calls;
+                if (_rm.tool_call_id) safeMsg.tool_call_id = _rm.tool_call_id;
+                if (_rm.function_call) safeMsg.function_call = _rm.function_call;
+                if (_rm.refusal) safeMsg.refusal = _rm.refusal;
                 bodyObj.messages.push(safeMsg);
             }
         } catch (_e) {
@@ -477,8 +482,34 @@ async function _tryCopilotRisuFetch(url, options, mode) {
         const responseBody = _extractResponseBody(result);
         if (responseBody) {
             if (result.status === 524) {
+                // In compatibility mode, block the retry to prevent duplicate requests on iPhone/Safari
+                const _compatActive = await _isCompatibilityMode();
+                if (_compatActive) {
+                    console.warn(`[CupcakePM] Copilot ${mode} risuFetch returned 524 — compatibility mode blocks retry to prevent duplicate requests.`);
+                    return new Response(
+                        JSON.stringify({ error: { message: 'Copilot proxy returned 524 — retry blocked by compatibility mode to prevent duplicate requests', type: 'compat_524_blocked' } }),
+                        { status: 524, headers: new Headers({ 'Content-Type': 'application/json' }) }
+                    );
+                }
                 console.warn(`[CupcakePM] Copilot ${mode} risuFetch returned 524 for ${url.substring(0, 60)}; falling back.`);
                 return null;
+            }
+            // ─── Detect Node server proxy auth errors ───
+            // On Node-hosted RisuAI, the /proxy2 endpoint requires JWT auth
+            // (risu-auth header). When plainFetchDeforce routes through
+            // fetchWithProxy but the auth is missing/invalid, the proxy returns
+            // its own 400 error — NOT from the target API. Detect this and fall
+            // through to plainFetchForce (direct fetch) instead.
+            if (result.status === 400 && mode === 'plainFetchDeforce') {
+                try {
+                    const _proxyErrText = new TextDecoder().decode(responseBody);
+                    const _proxyErrObj = JSON.parse(_proxyErrText);
+                    const _knownProxyErrors = ['No auth header', 'Password Incorrect', 'Token Expired', 'Unknown Public Key', 'Invalid Signature'];
+                    if (_proxyErrObj?.error && _knownProxyErrors.some(e => String(_proxyErrObj.error).includes(e))) {
+                        console.warn(`[CupcakePM] Copilot ${mode} risuFetch got proxy auth error: "${_proxyErrObj.error}" — falling through to plainFetchForce`);
+                        return null;
+                    }
+                } catch (_) { /* not a proxy error JSON — continue normally */ }
             }
             console.log(`[CupcakePM] Copilot ${mode} risuFetch succeeded: status=${result.status} for ${url.substring(0, 60)}`);
             return new Response(/** @type {any} */ (responseBody), {

@@ -502,6 +502,25 @@ export const autoUpdaterMethods = {
             console.warn(`${LOG} Update bundle path failed, falling back to direct JS:`, bundleErr.message || bundleErr);
         }
 
+        // Best-effort: fetch expected SHA-256 from versions manifest for fallback integrity check
+        let _fallbackExpectedSha256 = null;
+        try {
+            const vUrl = this.VERSIONS_URL + '?_t=' + Date.now();
+            const vRes = await Promise.race([
+                Risu.risuFetch(vUrl, { method: 'GET', plainFetchForce: true }),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('versions manifest timed out (10s)')), 10000)),
+            ]);
+            if (vRes?.data) {
+                const vData = typeof vRes.data === 'string' ? JSON.parse(vRes.data) : vRes.data;
+                _fallbackExpectedSha256 = vData?.['Cupcake Provider Manager']?.sha256 || null;
+                if (_fallbackExpectedSha256) {
+                    console.log(`${LOG} Fallback integrity: got expected SHA from versions manifest [${_fallbackExpectedSha256.substring(0, 12)}…]`);
+                }
+            }
+        } catch (_) {
+            console.warn(`${LOG} Could not fetch versions manifest for fallback integrity check — proceeding without SHA verification`);
+        }
+
         for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
             try {
                 console.log(`${LOG} Attempt ${attempt}/${MAX_RETRIES}: ${url}`);
@@ -523,6 +542,16 @@ export const autoUpdaterMethods = {
                         throw new Error(`risuFetch failed with status ${risuResult.status}`);
                     }
                     const code = typeof risuResult.data === 'string' ? risuResult.data : String(risuResult.data || '');
+                    // Verify SHA-256 if available
+                    if (_fallbackExpectedSha256) {
+                        const actualHash = await _computeSHA256(code);
+                        if (actualHash && actualHash !== _fallbackExpectedSha256) {
+                            throw new Error(`direct download sha256 mismatch: expected ${_fallbackExpectedSha256.substring(0, 12)}…, got ${(actualHash || '?').substring(0, 12)}…`);
+                        }
+                        if (actualHash) console.log(`${LOG} Fallback integrity OK [sha256:${actualHash.substring(0, 12)}…]`);
+                    } else {
+                        console.warn(`${LOG} ⚠️ Direct download completed WITHOUT SHA-256 verification (versions manifest unavailable)`);
+                    }
                     return { ok: true, code };
                 }
 
@@ -547,6 +576,17 @@ export const autoUpdaterMethods = {
                         return { ok: false, error: `다운로드 불완전: ${contentLength}B 중 ${actualBytes}B만 수신됨` };
                     }
                     console.log(`${LOG} Content-Length OK: ${actualBytes}B / ${contentLength}B`);
+                }
+
+                // Verify SHA-256 if available
+                if (_fallbackExpectedSha256) {
+                    const actualHash = await _computeSHA256(text);
+                    if (actualHash && actualHash !== _fallbackExpectedSha256) {
+                        throw new Error(`direct download sha256 mismatch: expected ${_fallbackExpectedSha256.substring(0, 12)}…, got ${(actualHash || '?').substring(0, 12)}…`);
+                    }
+                    if (actualHash) console.log(`${LOG} Fallback integrity OK [sha256:${actualHash.substring(0, 12)}…]`);
+                } else {
+                    console.warn(`${LOG} ⚠️ Direct download completed WITHOUT SHA-256 verification (versions manifest unavailable)`);
                 }
 
                 return { ok: true, code: text };

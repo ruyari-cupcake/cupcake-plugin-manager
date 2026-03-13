@@ -44,9 +44,20 @@ vi.mock('../src/lib/api-request-log.js', () => ({
     clearApiRequests: vi.fn(),
 }));
 
+// ── Mock stream-utils: bridge capable by default (streaming allowed) ──
+const mockCheckStreamCapability = vi.fn().mockResolvedValue(true);
+vi.mock('../src/lib/stream-utils.js', async (importOriginal) => {
+    const original = await importOriginal();
+    return {
+        ...original,
+        checkStreamCapability: (...args) => mockCheckStreamCapability(...args),
+    };
+});
+
 import { fetchCustom } from '../src/lib/fetch-custom.js';
 import { collectStream } from '../src/lib/stream-utils.js';
 import { _takeTokenUsage, _tokenUsageStore } from '../src/lib/token-usage.js';
+import { KeyPool } from '../src/lib/key-pool.js';
 
 if (typeof globalThis.window === 'undefined') {
     globalThis.window = globalThis;
@@ -258,6 +269,7 @@ describe('fetch-custom E2E — Streaming full pipeline', () => {
         _tokenUsageStore.clear();
         mockGetBoolArg.mockImplementation(async (key) => {
             if (key === 'cpm_streaming_enabled') return true;
+            if (key === 'cpm_streaming_show_thinking') return true;
             return false;
         });
     });
@@ -422,6 +434,8 @@ describe('fetch-custom E2E — Streaming full pipeline', () => {
 describe('fetch-custom E2E — Key rotation edge cases', () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        KeyPool._cooldowns = {};
+        KeyPool._pools = {};
         mockGetBoolArg.mockResolvedValue(false);
         _tokenUsageStore.clear();
     });
@@ -487,6 +501,8 @@ describe('fetch-custom E2E — Key rotation edge cases', () => {
 describe('fetch-custom E2E — Anthropic adaptive + budget thinking non-streaming', () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        KeyPool._cooldowns = {};
+        KeyPool._pools = {};
         mockGetBoolArg.mockResolvedValue(false);
     });
 

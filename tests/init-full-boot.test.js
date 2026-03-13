@@ -83,7 +83,7 @@ vi.mock('../src/lib/aws-signer.js', () => ({ AwsV4Signer: class {} }));
 vi.mock('../src/lib/smart-fetch.js', () => ({ smartNativeFetch: h.smartFetch }));
 vi.mock('../src/lib/model-helpers.js', () => ({ needsCopilotResponsesAPI: vi.fn(() => false) }));
 vi.mock('../src/lib/response-parsers.js', () => ({ parseClaudeNonStreamingResponse: vi.fn(), parseGeminiNonStreamingResponse: vi.fn(), parseOpenAINonStreamingResponse: vi.fn(), parseResponsesAPINonStreamingResponse: vi.fn() }));
-vi.mock('../src/lib/stream-builders.js', () => ({ createSSEStream: vi.fn(), createOpenAISSEStream: vi.fn(), createResponsesAPISSEStream: vi.fn(), createAnthropicSSEStream: vi.fn(), saveThoughtSignatureFromStream: vi.fn() }));
+vi.mock('../src/lib/stream-builders.js', () => ({ createSSEStream: vi.fn(), createOpenAISSEStream: vi.fn(), createResponsesAPISSEStream: vi.fn(), createAnthropicSSEStream: vi.fn(), saveThoughtSignatureFromStream: vi.fn(), setApiRequestLogger: vi.fn() }));
 vi.mock('../src/lib/stream-utils.js', () => ({ collectStream: vi.fn(), checkStreamCapability: vi.fn(async () => true) }));
 vi.mock('../src/lib/copilot-token.js', () => ({ ensureCopilotApiToken: vi.fn(async () => 'tok'), setCopilotGetArgFn: vi.fn(), setCopilotFetchFn: vi.fn() }));
 vi.mock('../src/lib/key-pool.js', () => ({ KeyPool: { setGetArgFn: vi.fn(), pick: vi.fn(async () => 'key') } }));

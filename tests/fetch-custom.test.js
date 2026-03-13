@@ -41,6 +41,12 @@ vi.mock('../src/lib/api-request-log.js', () => ({
     clearApiRequests: vi.fn(),
 }));
 
+// ── Mock stream-utils: bridge capable by default (streaming allowed) ──
+const mockCheckStreamCapability = vi.fn().mockResolvedValue(true);
+vi.mock('../src/lib/stream-utils.js', () => ({
+    checkStreamCapability: (...args) => mockCheckStreamCapability(...args),
+}));
+
 import { fetchCustom } from '../src/lib/fetch-custom.js';
 
 // ── Ensure `window` is available in Node test environment ──

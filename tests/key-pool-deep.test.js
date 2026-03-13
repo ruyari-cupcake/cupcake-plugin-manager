@@ -9,6 +9,7 @@ import { KeyPool } from '../src/lib/key-pool.js';
 describe('KeyPool — deep coverage', () => {
     beforeEach(() => {
         KeyPool._pools = {};
+        KeyPool._cooldowns = {};
         KeyPool.setGetArgFn(async () => '');
     });
 
