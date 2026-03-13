@@ -1,5 +1,16 @@
 # cupcake-plugin-manager
 
+> ## ⛔ AI 에이전트 필독 — 절대 규칙 ⛔
+>
+> **`origin/main` (본서버)에 절대로 push하지 마라.**
+>
+> - 모든 작업(버그픽스, 기능추가, 테스트)은 반드시 **`test/main` (테스트서버)** 에만 push한다.
+> - 본서버(`origin/main`)는 **사용자가 직접 명시적으로 "본서버에 올려"라고 말한 경우에만** push한다.
+> - 이 규칙은 어떤 상황에서도 예외 없이 적용된다.
+> - `git push`를 할 때 반드시 remote와 branch를 확인하라. 기본 push 대상이 `origin/main`이므로 주의.
+>
+> **위반 시 사용자에게 실제 피해가 발생한다 (자동 업데이트로 다른 사용자에게 전파됨).**
+
 **Cupcake Provider Manager (CPM)** is a RisuAI V3 plugin that acts as a meta-framework for managing multiple AI provider backends (OpenAI, Anthropic, Gemini, Vertex AI, AWS Bedrock, DeepSeek, OpenRouter, GitHub Copilot, etc.) via sub-plugins.
 
 ## Features
