@@ -21,12 +21,14 @@ vi.mock('../src/lib/copilot-token.js', () => ({
     ensureCopilotApiToken: vi.fn().mockResolvedValue(''),
 }));
 
-// ── Mock shared-state safeGetBoolArg ──
+// ── Mock shared-state safeGetArg / safeGetBoolArg ──
+const mockGetArg = vi.fn().mockResolvedValue('');
 const mockGetBoolArg = vi.fn().mockResolvedValue(false);
 vi.mock('../src/lib/shared-state.js', async (importOriginal) => {
     const original = await importOriginal();
     return {
         ...original,
+        safeGetArg: (...args) => mockGetArg(...args),
         safeGetBoolArg: (...args) => mockGetBoolArg(...args),
     };
 });
@@ -93,6 +95,7 @@ const BASIC_MESSAGES = [
 describe('fetchCustom — Integration', () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        mockGetArg.mockResolvedValue('');
         mockGetBoolArg.mockResolvedValue(false); // streaming disabled by default
     });
 
@@ -779,6 +782,85 @@ describe('fetchCustom — Integration', () => {
             expect(firstHeaders['Vscode-Sessionid']).toBe(secondHeaders['Vscode-Sessionid']);
             expect(firstHeaders['X-Interaction-Id']).toBeTruthy();
             expect(firstHeaders['X-Request-Id']).toBeTruthy();
+        });
+
+        it('uses legacy Copilot request headers in nodeless mode 2', async () => {
+            delete window._cpmCopilotMachineId;
+            delete window._cpmCopilotSessionId;
+            mockGetArg.mockImplementation(async (key) => key === 'cpm_copilot_nodeless_mode' ? 'nodeless-2' : '');
+            mockFetch.mockResolvedValue(makeOkJsonResponse({
+                choices: [{ message: { content: 'legacy ok' } }],
+            }));
+
+            const config = {
+                url: 'https://api.githubcopilot.com/chat/completions', key: 'ghu_test',
+                model: 'gpt-4.1', format: 'openai', copilotToken: 'cpt-123', responsesMode: 'off',
+            };
+
+            await fetchCustom(config, BASIC_MESSAGES, 0.7, 4096, {});
+
+            const headers = mockFetch.mock.calls[0][1].headers;
+            expect(headers['Authorization']).toBe('Bearer cpt-123');
+            expect(headers['Copilot-Integration-Id']).toBe('vscode-chat');
+            expect(headers['Editor-Version']).toBeUndefined();
+            expect(headers['Editor-Plugin-Version']).toBeUndefined();
+            expect(headers['Vscode-Machineid']).toBeUndefined();
+            expect(headers['Vscode-Sessionid']).toBeUndefined();
+            expect(headers['X-Interaction-Id']).toBeUndefined();
+            expect(headers['X-Request-Id']).toBeUndefined();
+        });
+
+        it('keeps full Copilot request headers in nodeless-1 mode (only token exchange is reduced)', async () => {
+            delete window._cpmCopilotMachineId;
+            delete window._cpmCopilotSessionId;
+            mockGetArg.mockImplementation(async (key) => key === 'cpm_copilot_nodeless_mode' ? 'nodeless-1' : '');
+            mockFetch.mockResolvedValue(makeOkJsonResponse({
+                choices: [{ message: { content: 'full headers ok' } }],
+            }));
+
+            const config = {
+                url: 'https://api.githubcopilot.com/chat/completions', key: 'ghu_test',
+                model: 'gpt-4.1', format: 'openai', copilotToken: 'cpt-456', responsesMode: 'off',
+            };
+
+            const result = await fetchCustom(config, BASIC_MESSAGES, 0.7, 4096, {});
+            expect(result.success).toBe(true);
+
+            const headers = mockFetch.mock.calls[0][1].headers;
+            // nodeless-1 should NOT reduce request headers (only token exchange)
+            expect(headers['Authorization']).toBe('Bearer cpt-456');
+            expect(headers['Copilot-Integration-Id']).toBe('vscode-chat');
+            expect(headers['Editor-Version']).toBeDefined();
+            expect(headers['Editor-Plugin-Version']).toBeDefined();
+            expect(headers['User-Agent']).toBeDefined();
+            expect(headers['Vscode-Machineid']).toMatch(/^[a-f0-9]{64}$/);
+            expect(headers['Vscode-Sessionid']).toBeTruthy();
+            expect(headers['X-Interaction-Id']).toBeTruthy();
+            expect(headers['X-Request-Id']).toBeTruthy();
+        });
+
+        it('keeps full Copilot request headers when nodeless mode is off (default)', async () => {
+            delete window._cpmCopilotMachineId;
+            delete window._cpmCopilotSessionId;
+            // mockGetArg returns '' by default → nodeless mode 'off'
+            mockFetch.mockResolvedValue(makeOkJsonResponse({
+                choices: [{ message: { content: 'default ok' } }],
+            }));
+
+            const config = {
+                url: 'https://api.githubcopilot.com/chat/completions', key: 'ghu_test',
+                model: 'gpt-4.1', format: 'openai', copilotToken: 'cpt-789', responsesMode: 'off',
+            };
+
+            await fetchCustom(config, BASIC_MESSAGES, 0.7, 4096, {});
+
+            const headers = mockFetch.mock.calls[0][1].headers;
+            expect(headers['Editor-Version']).toBeDefined();
+            expect(headers['Editor-Plugin-Version']).toBeDefined();
+            expect(headers['Vscode-Machineid']).toBeTruthy();
+            expect(headers['Vscode-Sessionid']).toBeTruthy();
+            expect(headers['X-Interaction-Id']).toBeTruthy();
+            expect(headers['X-Request-Id']).toBeTruthy();
         });
 
         it('keeps Copilot Anthropic requests free of direct-browser beta headers', async () => {

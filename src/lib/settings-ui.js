@@ -16,6 +16,7 @@ import { SettingsBackup } from './settings-backup.js';
 import { SubPluginManager } from './sub-plugin-manager.js';
 import { checkStreamCapability } from './stream-utils.js';
 import { _resetCompatibilityCache } from './smart-fetch.js';
+import { clearCopilotTokenCache } from './copilot-token.js';
 import { escHtml } from './helpers.js';
 import { renderCustomModelEditor, initCustomModelsManager } from './settings-ui-custom-models.js';
 import { buildPluginsTabRenderer } from './settings-ui-plugins.js';
@@ -90,8 +91,9 @@ export async function openCpmSettings() {
         await Risu.setArgument(k, String(v));
         SettingsBackup.updateKey(k, String(v));
         // Invalidate smart-fetch compatibility cache when relevant settings change
-        if (k === 'cpm_compatibility_mode' || k === 'cpm_streaming_enabled') {
+        if (k === 'cpm_compatibility_mode' || k === 'cpm_streaming_enabled' || k === 'cpm_copilot_nodeless_mode') {
             _resetCompatibilityCache();
+            if (k === 'cpm_copilot_nodeless_mode') clearCopilotTokenCache();
             queueMicrotask(() => {
                 Promise.resolve(refreshStatusIndicators()).catch(err => {
                     console.error('[CupcakePM] Failed to refresh status indicators:', err);
@@ -116,15 +118,18 @@ export async function openCpmSettings() {
 
             if (compatStatusEl) {
                 const manualEnabled = await safeGetBoolArg('cpm_compatibility_mode', false);
+                const nodelessMode = await safeGetArg('cpm_copilot_nodeless_mode', 'off');
                 compatStatusEl.classList.remove('border-gray-600', 'border-emerald-700', 'border-amber-700');
                 if (manualEnabled) {
-                    compatStatusEl.innerHTML = '<span class="text-amber-400">⚡ 수동 활성화됨</span> — nativeFetch 건너뛰기 + 스트리밍 자동 비활성화.';
+                    compatStatusEl.innerHTML = `<span class="text-amber-400">⚡ 수동 활성화됨</span> — nativeFetch 건너뛰기 + 스트리밍 자동 비활성화.${nodelessMode !== 'off' ? ` <span class="text-cyan-300">Node-less 실험 모드: ${escHtml(nodelessMode)}</span>` : ''}`;
                     compatStatusEl.classList.add('border-amber-700');
                 } else if (!capable) {
-                    compatStatusEl.innerHTML = '<span class="text-amber-400">⚡ 자동 활성화됨</span> — Bridge가 ReadableStream을 지원하지 않아 자동 적용 (iPhone/Safari 등).';
+                    compatStatusEl.innerHTML = `<span class="text-amber-400">⚡ 자동 활성화됨</span> — Bridge가 ReadableStream을 지원하지 않아 자동 적용 (iPhone/Safari 등).${nodelessMode !== 'off' ? ` <span class="text-cyan-300">Node-less 실험 모드: ${escHtml(nodelessMode)}</span>` : ''}`;
                     compatStatusEl.classList.add('border-amber-700');
                 } else {
-                    compatStatusEl.innerHTML = '<span class="text-emerald-400">✓ 비활성</span> — Bridge 정상. 호환성 모드가 필요하지 않습니다.';
+                    compatStatusEl.innerHTML = nodelessMode === 'off'
+                        ? '<span class="text-emerald-400">✓ 비활성</span> — Bridge 정상. 호환성 모드가 필요하지 않습니다.'
+                        : `<span class="text-cyan-300">🧪 Node-less 실험 모드</span> — iPhone용 호환성은 꺼져 있지만 Copilot 헤더 전략은 ${escHtml(nodelessMode)} 로 동작합니다.`;
                     compatStatusEl.classList.add('border-emerald-700');
                 }
             }
@@ -318,7 +323,13 @@ export async function openCpmSettings() {
                     </div>
                     <div class="space-y-3">
                         ${await renderInput('cpm_compatibility_mode', '호환성 모드 강제 활성화 (Force Compatibility Mode)', 'checkbox')}
+                        ${await renderInput('cpm_copilot_nodeless_mode', 'Node-less용 Copilot 실험 모드', 'select', [
+                            { value: 'off', text: '끄기 (기본 헤더 유지)' },
+                            { value: 'nodeless-1', text: '실험 1 — 토큰 교환 헤더만 축소' },
+                            { value: 'nodeless-2', text: '실험 2 — 토큰 + 실제 요청 헤더 축소' },
+                        ])}
                     </div>
+                    <p class="text-xs text-cyan-400/90 mt-3">💡 Node-less 실험 모드는 Copilot 전용입니다. 사용자가 1번/2번을 바꿔가며 어떤 조합이 통하는지 직접 테스트할 수 있습니다.</p>
                 </div>
             </div>
             <div class="mt-10 pt-6 border-t border-gray-700">

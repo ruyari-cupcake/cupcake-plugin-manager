@@ -1,7 +1,7 @@
 //@name Cupcake_Provider_Manager
 //@display-name Cupcake Provider Manager
 //@api 3.0
-//@version 1.20.3
+//@version 1.20.4
 //@update-url https://cupcake-plugin-manager-test.vercel.app/api/main-plugin
 
 // ==========================================
@@ -90,3 +90,4 @@
 
 // --- Compatibility ---
 //@arg cpm_compatibility_mode string Compatibility Mode — skip nativeFetch, use risuFetch only. Enable if requests hang or fail on iPhone/Safari. (true/false)
+//@arg cpm_copilot_nodeless_mode string Copilot Node-less Experimental Mode (off, nodeless-1, nodeless-2)

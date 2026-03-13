@@ -89,6 +89,7 @@ describe('Copilot Token', () => {
         const p3 = ensureCopilotApiToken();
 
         await Promise.resolve();
+        await Promise.resolve();
         expect(mockFetch).toHaveBeenCalledOnce();
 
         resolveFetch();
@@ -177,5 +178,131 @@ describe('Copilot Token', () => {
         // Verify the Authorization header was sent with cleaned token
         const headers = mockFetch.mock.calls[0][1].headers;
         expect(headers.Authorization).toBe('Bearer ghp_testtoken');
+    });
+
+    it('reduces token exchange headers in nodeless-1 mode', async () => {
+        setCopilotGetArgFn(async (key) => {
+            if (key === 'tools_githubCopilotToken') return 'ghp_testtoken';
+            if (key === 'cpm_copilot_nodeless_mode') return 'nodeless-1';
+            return '';
+        });
+
+        const mockFetch = vi.fn().mockResolvedValue({
+            ok: true,
+            json: async () => ({
+                token: 'nodeless-token',
+                expires_at: Math.floor(Date.now() / 1000) + 3600,
+            }),
+        });
+        setCopilotFetchFn(mockFetch);
+
+        const token = await ensureCopilotApiToken();
+        expect(token).toBe('nodeless-token');
+
+        const headers = mockFetch.mock.calls[0][1].headers;
+        expect(headers.Authorization).toBe('Bearer ghp_testtoken');
+        expect(headers['User-Agent']).toBeTruthy();
+        expect(headers['Editor-Version']).toBeUndefined();
+        expect(headers['Editor-Plugin-Version']).toBeUndefined();
+        expect(headers['X-GitHub-Api-Version']).toBeUndefined();
+    });
+
+    it('reduces token exchange headers in nodeless-2 mode (same reduction as nodeless-1)', async () => {
+        setCopilotGetArgFn(async (key) => {
+            if (key === 'tools_githubCopilotToken') return 'ghp_testtoken';
+            if (key === 'cpm_copilot_nodeless_mode') return 'nodeless-2';
+            return '';
+        });
+
+        const mockFetch = vi.fn().mockResolvedValue({
+            ok: true,
+            json: async () => ({
+                token: 'nodeless2-token',
+                expires_at: Math.floor(Date.now() / 1000) + 3600,
+            }),
+        });
+        setCopilotFetchFn(mockFetch);
+
+        const token = await ensureCopilotApiToken();
+        expect(token).toBe('nodeless2-token');
+
+        const headers = mockFetch.mock.calls[0][1].headers;
+        expect(headers.Authorization).toBe('Bearer ghp_testtoken');
+        expect(headers['User-Agent']).toBeTruthy();
+        expect(headers['Editor-Version']).toBeUndefined();
+        expect(headers['Editor-Plugin-Version']).toBeUndefined();
+        expect(headers['X-GitHub-Api-Version']).toBeUndefined();
+    });
+
+    it('keeps full token exchange headers when mode is off', async () => {
+        setCopilotGetArgFn(async (key) => {
+            if (key === 'tools_githubCopilotToken') return 'ghp_testtoken';
+            if (key === 'cpm_copilot_nodeless_mode') return 'off';
+            return '';
+        });
+
+        const mockFetch = vi.fn().mockResolvedValue({
+            ok: true,
+            json: async () => ({
+                token: 'full-headers-token',
+                expires_at: Math.floor(Date.now() / 1000) + 3600,
+            }),
+        });
+        setCopilotFetchFn(mockFetch);
+
+        await ensureCopilotApiToken();
+
+        const headers = mockFetch.mock.calls[0][1].headers;
+        expect(headers['Editor-Version']).toMatch(/^vscode\//); 
+        expect(headers['Editor-Plugin-Version']).toMatch(/^copilot-chat\//); 
+        expect(headers['X-GitHub-Api-Version']).toBeTruthy();
+    });
+
+    it('falls back to full headers for unknown/garbage mode value', async () => {
+        setCopilotGetArgFn(async (key) => {
+            if (key === 'tools_githubCopilotToken') return 'ghp_testtoken';
+            if (key === 'cpm_copilot_nodeless_mode') return 'banana';
+            return '';
+        });
+
+        const mockFetch = vi.fn().mockResolvedValue({
+            ok: true,
+            json: async () => ({
+                token: 'fallback-token',
+                expires_at: Math.floor(Date.now() / 1000) + 3600,
+            }),
+        });
+        setCopilotFetchFn(mockFetch);
+
+        await ensureCopilotApiToken();
+
+        const headers = mockFetch.mock.calls[0][1].headers;
+        // Unknown value should normalize to 'off' → full headers
+        expect(headers['Editor-Version']).toBeDefined();
+        expect(headers['Editor-Plugin-Version']).toBeDefined();
+        expect(headers['X-GitHub-Api-Version']).toBeDefined();
+    });
+
+    it('keeps full headers when nodeless mode returns empty/null from getArg', async () => {
+        setCopilotGetArgFn(async (key) => {
+            if (key === 'tools_githubCopilotToken') return 'ghp_testtoken';
+            // cpm_copilot_nodeless_mode not set → returns ''
+            return '';
+        });
+
+        const mockFetch = vi.fn().mockResolvedValue({
+            ok: true,
+            json: async () => ({
+                token: 'default-token',
+                expires_at: Math.floor(Date.now() / 1000) + 3600,
+            }),
+        });
+        setCopilotFetchFn(mockFetch);
+
+        await ensureCopilotApiToken();
+
+        const headers = mockFetch.mock.calls[0][1].headers;
+        expect(headers['Editor-Version']).toBeDefined();
+        expect(headers['Editor-Plugin-Version']).toBeDefined();
     });
 });

@@ -4,6 +4,10 @@
  * Handles OAuth → API token exchange with caching and single-flight dedup.
  * Uses dependency injection for safeGetArg and fetch to enable testing.
  */
+import {
+    buildCopilotTokenExchangeHeaders,
+    normalizeCopilotNodelessMode,
+} from './copilot-headers.js';
 
 /** Negative cache duration (ms) — prevents rapid-fire retries after failure */
 const _NEGATIVE_CACHE_MS = 60000;
@@ -57,6 +61,7 @@ export async function ensureCopilotApiToken() {
 
     _copilotTokenPromise = (async () => {
         const githubToken = await _getArgFn('tools_githubCopilotToken');
+        const nodelessMode = normalizeCopilotNodelessMode(await _getArgFn('cpm_copilot_nodeless_mode'));
         if (!githubToken) {
             console.warn('[Cupcake PM] Copilot: No GitHub OAuth token found. Set token via Copilot Manager.');
             return '';
@@ -66,22 +71,9 @@ export async function ensureCopilotApiToken() {
         if (!cleanToken) return '';
 
         console.log('[Cupcake PM] Copilot: Exchanging OAuth token for API token...');
-        // GitHub API requires User-Agent header (returns 403 without it).
-        // Editor-Version etc. are needed for proper Copilot token exchange.
-        // These headers work fine through nativeFetch (server-side, no CORS)
-        // and through proxy (plainFetchDeforce). On the direct browser fetch
-        // fallback (plainFetchForce), CORS may block them, but that path
-        // already fails for other reasons (Authorization triggers preflight).
         const res = await fetchFn('https://api.github.com/copilot_internal/v2/token', {
             method: 'GET',
-            headers: {
-                'Accept': 'application/json',
-                'Authorization': `Bearer ${cleanToken}`,
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Code/1.109.2 Chrome/142.0.7444.265 Electron/39.3.0 Safari/537.36',
-                'Editor-Version': 'vscode/1.109.2',
-                'Editor-Plugin-Version': 'copilot-chat/0.37.4',
-                'X-GitHub-Api-Version': '2024-12-15',
-            },
+            headers: buildCopilotTokenExchangeHeaders(cleanToken, nodelessMode),
         });
 
         if (!res.ok) {

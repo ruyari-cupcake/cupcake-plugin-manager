@@ -49,6 +49,7 @@ export const BASE_SETTING_KEYS = [
     'cpm_show_token_usage',
     'cpm_streaming_enabled', 'cpm_streaming_show_thinking',
     'cpm_compatibility_mode',
+    'cpm_copilot_nodeless_mode',
 ];
 
 /**

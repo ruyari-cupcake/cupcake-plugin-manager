@@ -5,7 +5,7 @@
  * streaming/non-streaming, Copilot integration, key rotation,
  * and Responses API support.
  */
-import { safeGetBoolArg } from './shared-state.js';
+import { safeGetArg, safeGetBoolArg } from './shared-state.js';
 import { sanitizeMessages, sanitizeBodyJSON } from './sanitize.js';
 import { safeStringify, hasNonEmptyMessageContent, hasAttachedMultimodals, safeUUID } from './helpers.js';
 import { formatToOpenAI } from './format-openai.js';
@@ -30,7 +30,11 @@ import {
 import { smartNativeFetch } from './smart-fetch.js';
 import { checkStreamCapability } from './stream-utils.js';
 import { ensureCopilotApiToken } from './copilot-token.js';
-import { getCopilotStaticHeaders } from './copilot-headers.js';
+import {
+    getCopilotStaticHeaders,
+    normalizeCopilotNodelessMode,
+    shouldUseLegacyCopilotRequestHeaders,
+} from './copilot-headers.js';
 import { KeyPool } from './key-pool.js';
 import { updateApiRequest as _updateApiRequest } from './api-request-log.js';
 
@@ -390,6 +394,8 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
 
         // Copilot headers
         if (effectiveUrl && effectiveUrl.includes('githubcopilot.com')) {
+            const copilotNodelessMode = normalizeCopilotNodelessMode(await safeGetArg('cpm_copilot_nodeless_mode'));
+            const useLegacyHeaders = shouldUseLegacyCopilotRequestHeaders(copilotNodelessMode);
             let copilotApiToken = config.copilotToken || '';
             if (!copilotApiToken) copilotApiToken = await ensureCopilotApiToken();
             if (copilotApiToken) {
@@ -406,11 +412,13 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
             }
             if (!_win._cpmCopilotSessionId) _win._cpmCopilotSessionId = safeUUID() + Date.now().toString();
 
-            Object.assign(headers, getCopilotStaticHeaders());
-            headers['Vscode-Machineid'] = _win._cpmCopilotMachineId;
-            headers['Vscode-Sessionid'] = _win._cpmCopilotSessionId;
-            headers['X-Interaction-Id'] = safeUUID();
-            headers['X-Request-Id'] = safeUUID();
+            Object.assign(headers, getCopilotStaticHeaders(copilotNodelessMode));
+            if (!useLegacyHeaders) {
+                headers['Vscode-Machineid'] = _win._cpmCopilotMachineId;
+                headers['Vscode-Sessionid'] = _win._cpmCopilotSessionId;
+                headers['X-Interaction-Id'] = safeUUID();
+                headers['X-Request-Id'] = safeUUID();
+            }
 
             if (format === 'anthropic') headers['anthropic-version'] = '2023-06-01';
 
