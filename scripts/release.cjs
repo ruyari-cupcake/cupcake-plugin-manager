@@ -37,13 +37,17 @@ const p = (...segs) => path.join(ROOT, ...segs);
 const log = (tag, msg) => console.log(`[release:${tag}] ${msg}`);
 const fail = (msg) => { console.error(`\n❌  RELEASE ABORTED: ${msg}\n`); process.exit(1); };
 
+function normalizeEol(text) {
+    return String(text).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+}
+
 function sha256(filePath) {
-    const content = fs.readFileSync(filePath, 'utf-8');
+    const content = normalizeEol(fs.readFileSync(filePath, 'utf-8'));
     return crypto.createHash('sha256').update(content, 'utf-8').digest('hex');
 }
 
 function sha256str(content) {
-    return crypto.createHash('sha256').update(content, 'utf-8').digest('hex');
+    return crypto.createHash('sha256').update(normalizeEol(content), 'utf-8').digest('hex');
 }
 
 function extractVersionFromHeader(filePath) {
@@ -98,18 +102,24 @@ if (!fs.existsSync(distFile)) {
     fail('dist/provider-manager.js not found after build');
 }
 
+const distNormalized = normalizeEol(fs.readFileSync(distFile, 'utf-8'));
+if (!DRY_RUN) {
+    fs.writeFileSync(distFile, distNormalized, 'utf-8');
+}
+
 // ════════════════════════════════════════════════════════════════
 // Step 2: Copy dist → root (only if content changed)
 // ════════════════════════════════════════════════════════════════
 const distHash = sha256(distFile);
 const rootExists = fs.existsSync(rootFile);
+const rootRaw = rootExists ? fs.readFileSync(rootFile, 'utf-8') : '';
 const rootHash = rootExists ? sha256(rootFile) : '';
 
-if (distHash !== rootHash) {
+if (distHash !== rootHash || rootRaw !== distNormalized) {
     if (DRY_RUN) {
         log('copy', `DRY-RUN: would copy dist → root (hash ${distHash.substring(0, 12)}…)`);
     } else {
-        fs.copyFileSync(distFile, rootFile);
+        fs.writeFileSync(rootFile, distNormalized, 'utf-8');
         log('copy', `✓ Copied dist/provider-manager.js → root (hash ${distHash.substring(0, 12)}…)`);
     }
 } else {
@@ -161,7 +171,7 @@ for (const [name, info] of Object.entries(versions)) {
         filePath = p('dist', info.file);
     }
     if (!fs.existsSync(filePath)) continue;
-    const src = fs.readFileSync(filePath, 'utf-8');
+    const src = normalizeEol(fs.readFileSync(filePath, 'utf-8'));
     code[info.file] = src;
     const hash = sha256str(src);
     info.sha256 = hash;

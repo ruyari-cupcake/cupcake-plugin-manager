@@ -8,8 +8,12 @@ const crypto = require('crypto');
 const ROOT = path.resolve(__dirname, '..');
 const p = (...parts) => path.join(ROOT, ...parts);
 
+function normalizeEol(text) {
+    return String(text).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+}
+
 function readText(filePath) {
-    return fs.readFileSync(filePath, 'utf-8');
+    return normalizeEol(fs.readFileSync(filePath, 'utf-8'));
 }
 
 function readJson(filePath) {
@@ -17,7 +21,7 @@ function readJson(filePath) {
 }
 
 function sha256(text) {
-    return crypto.createHash('sha256').update(text, 'utf-8').digest('hex');
+    return crypto.createHash('sha256').update(normalizeEol(text), 'utf-8').digest('hex');
 }
 
 function headerVersion(source, label) {

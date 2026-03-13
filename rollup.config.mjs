@@ -11,7 +11,7 @@
  * `src/cpm-url.config.js` — the single source of truth for the deployment URL.
  */
 import resolve from '@rollup/plugin-node-resolve';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 
 // ── Read the single-source-of-truth URL ──
 const urlConfigSrc = readFileSync(
@@ -36,6 +36,10 @@ pluginHeader = pluginHeader.replace(
   `$1${CPM_BASE_URL}/api/main-plugin`,
 );
 
+function normalizeEol(text) {
+  return String(text).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+}
+
 export default {
   input: 'src/index.js',
   output: {
@@ -47,5 +51,17 @@ export default {
   },
   plugins: [
     resolve(),
+    {
+      name: 'normalize-dist-eol',
+      writeBundle(options) {
+        if (!options.file) return;
+        const outputFile = new URL(`./${options.file}`, import.meta.url);
+        const raw = readFileSync(outputFile, 'utf-8');
+        const normalized = normalizeEol(raw);
+        if (raw !== normalized) {
+          writeFileSync(outputFile, normalized, 'utf-8');
+        }
+      },
+    },
   ],
 };
