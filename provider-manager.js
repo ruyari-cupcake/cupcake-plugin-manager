@@ -1,7 +1,7 @@
 //@name Cupcake_Provider_Manager
 //@display-name Cupcake Provider Manager
 //@api 3.0
-//@version 1.20.1
+//@version 1.20.2
 //@update-url https://cupcake-plugin-manager-test.vercel.app/api/main-plugin
 
 // ==========================================
@@ -166,7 +166,7 @@ var CupcakeProviderManager = (function (exports) {
     /** @typedef {Window & typeof globalThis & { risuai?: any, Risuai?: any }} RisuWindow */
 
     // ─── Constants ───
-    const CPM_VERSION = '1.20.1';
+    const CPM_VERSION = '1.20.2';
 
     // ─── RisuAI Global Reference ───
     const risuWindow = typeof window !== 'undefined'
@@ -3238,15 +3238,16 @@ var CupcakeProviderManager = (function (exports) {
             if (!cleanToken) return '';
 
             console.log('[Cupcake PM] Copilot: Exchanging OAuth token for API token...');
+            // Token exchange headers: only standard CORS-safe headers + Authorization.
+            // Custom headers (Editor-Version, Editor-Plugin-Version, X-GitHub-Api-Version)
+            // trigger CORS preflight that api.github.com rejects, causing the exchange
+            // to fail on browser-based fetch paths (plainFetchForce, direct fetch).
+            // The nativeFetch path (server-side) adds User-Agent automatically.
             const res = await fetchFn('https://api.github.com/copilot_internal/v2/token', {
                 method: 'GET',
                 headers: {
                     'Accept': 'application/json',
                     'Authorization': `Bearer ${cleanToken}`,
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Code/1.109.2 Chrome/142.0.7444.265 Electron/39.3.0 Safari/537.36',
-                    'Editor-Version': 'vscode/1.109.2',
-                    'Editor-Plugin-Version': 'copilot-chat/0.37.4',
-                    'X-GitHub-Api-Version': '2024-12-15',
                 },
             });
 
@@ -3435,7 +3436,9 @@ var CupcakeProviderManager = (function (exports) {
 
         const _isCopilotUrl = url.includes('githubcopilot.com') || url.includes('copilot_internal');
         const _isGoogleApiUrl = url.includes('generativelanguage.googleapis.com') || url.includes('aiplatform.googleapis.com') || url.includes('oauth2.googleapis.com');
-        const _preferNativeFirst = (_isGoogleApiUrl || _isCopilotUrl) && (options.method || 'POST') !== 'GET';
+        // Copilot URLs always skip direct browser fetch (CSP blocks it in iframe sandbox).
+        // Google URLs skip only for non-GET (POST/SSE) where nativeFetch is more stable.
+        const _preferNativeFirst = (_isGoogleApiUrl && (options.method || 'POST') !== 'GET') || _isCopilotUrl;
 
         // ─── Compatibility Mode: skip nativeFetch entirely ───
         const _compatMode = await _isCompatibilityMode();
@@ -3503,9 +3506,11 @@ var CupcakeProviderManager = (function (exports) {
             }
         }
 
-        // ─── Copilot-specific: nativeFetch first for POST/SSE ───
+        // ─── Copilot-specific: nativeFetch first (GET token exchange + POST/SSE chat) ───
         // Skipped in compatibility mode for the same reason as Google.
-        if (!_compatMode && _isCopilotUrl && (options.method || 'POST') !== 'GET' && Risu && typeof Risu.nativeFetch === 'function') {
+        // GET is included because the OAuth→API token exchange is a GET request
+        // that also needs nativeFetch (direct browser fetch is blocked by iframe CSP).
+        if (!_compatMode && _isCopilotUrl && Risu && typeof Risu.nativeFetch === 'function') {
             try {
                 const nfOptions = { ...options };
                 if (typeof nfOptions.body === 'string') {
@@ -6112,8 +6117,14 @@ var CupcakeProviderManager = (function (exports) {
             if (effectiveUrl && effectiveUrl.includes('githubcopilot.com')) {
                 let copilotApiToken = config.copilotToken || '';
                 if (!copilotApiToken) copilotApiToken = await ensureCopilotApiToken();
-                if (copilotApiToken) headers['Authorization'] = `Bearer ${copilotApiToken}`;
-                else console.warn('[Cupcake PM] Copilot: No API token available.');
+                if (copilotApiToken) {
+                    headers['Authorization'] = `Bearer ${copilotApiToken}`;
+                } else {
+                    // Do NOT proceed with the raw OAuth token — the Copilot completions
+                    // API rejects it with "Authorization header is badly formatted".
+                    console.error('[Cupcake PM] Copilot: Token exchange failed — cannot authenticate.');
+                    return { success: false, content: '[Cupcake PM] Copilot API 토큰 교환 실패. GitHub Copilot OAuth 토큰이 유효한지 확인하세요. (Token exchange failed — check your Copilot OAuth token.)' };
+                }
 
                 if (!_win._cpmCopilotMachineId) {
                     _win._cpmCopilotMachineId = Array.from({ length: 64 }, () => Math.floor(Math.random() * 16).toString(16)).join('');

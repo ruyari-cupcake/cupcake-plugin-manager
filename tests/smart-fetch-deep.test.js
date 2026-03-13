@@ -679,7 +679,7 @@ describe('smartNativeFetch — internal helpers coverage', () => {
         expect(result.status).toBe(200);
     });
 
-    it('returns Copilot GET 404 fallback nativeFetch response after risuFetch attempts', async () => {
+    it('returns Copilot GET 404 via nativeFetch (GET now uses nativeFetch directly)', async () => {
         vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('CORS')));
         h.nativeFetch.mockResolvedValue({ ok: false, status: 404 });
 
@@ -688,8 +688,8 @@ describe('smartNativeFetch — internal helpers coverage', () => {
         });
 
         expect(result.status).toBe(404);
-        expect(h.risuFetch).toHaveBeenCalledTimes(2);
         expect(h.nativeFetch).toHaveBeenCalledTimes(1);
+        expect(h.risuFetch).not.toHaveBeenCalled();
     });
 
     it('falls back from Copilot GET 500 nativeFetch response to risuFetch', async () => {

@@ -392,8 +392,14 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
         if (effectiveUrl && effectiveUrl.includes('githubcopilot.com')) {
             let copilotApiToken = config.copilotToken || '';
             if (!copilotApiToken) copilotApiToken = await ensureCopilotApiToken();
-            if (copilotApiToken) headers['Authorization'] = `Bearer ${copilotApiToken}`;
-            else console.warn('[Cupcake PM] Copilot: No API token available.');
+            if (copilotApiToken) {
+                headers['Authorization'] = `Bearer ${copilotApiToken}`;
+            } else {
+                // Do NOT proceed with the raw OAuth token — the Copilot completions
+                // API rejects it with "Authorization header is badly formatted".
+                console.error('[Cupcake PM] Copilot: Token exchange failed — cannot authenticate.');
+                return { success: false, content: '[Cupcake PM] Copilot API 토큰 교환 실패. GitHub Copilot OAuth 토큰이 유효한지 확인하세요. (Token exchange failed — check your Copilot OAuth token.)' };
+            }
 
             if (!_win._cpmCopilotMachineId) {
                 _win._cpmCopilotMachineId = Array.from({ length: 64 }, () => Math.floor(Math.random() * 16).toString(16)).join('');

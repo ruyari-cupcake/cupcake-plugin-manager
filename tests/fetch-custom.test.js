@@ -1081,7 +1081,7 @@ describe('fetchCustom — Integration', () => {
 
             const config = {
                 url: 'https://api.githubcopilot.com/chat/completions', key: 'copilot-token',
-                model: 'gpt-5.4', format: 'openai', streaming: true,
+                model: 'gpt-5.4', format: 'openai', streaming: true, copilotToken: 'cpt-test',
             };
             const result = await fetchCustom(config, BASIC_MESSAGES, 0.7, 4096, {});
 

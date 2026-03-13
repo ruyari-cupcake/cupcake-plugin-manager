@@ -66,15 +66,16 @@ export async function ensureCopilotApiToken() {
         if (!cleanToken) return '';
 
         console.log('[Cupcake PM] Copilot: Exchanging OAuth token for API token...');
+        // Token exchange headers: only standard CORS-safe headers + Authorization.
+        // Custom headers (Editor-Version, Editor-Plugin-Version, X-GitHub-Api-Version)
+        // trigger CORS preflight that api.github.com rejects, causing the exchange
+        // to fail on browser-based fetch paths (plainFetchForce, direct fetch).
+        // The nativeFetch path (server-side) adds User-Agent automatically.
         const res = await fetchFn('https://api.github.com/copilot_internal/v2/token', {
             method: 'GET',
             headers: {
                 'Accept': 'application/json',
                 'Authorization': `Bearer ${cleanToken}`,
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Code/1.109.2 Chrome/142.0.7444.265 Electron/39.3.0 Safari/537.36',
-                'Editor-Version': 'vscode/1.109.2',
-                'Editor-Plugin-Version': 'copilot-chat/0.37.4',
-                'X-GitHub-Api-Version': '2024-12-15',
             },
         });
 

@@ -128,7 +128,9 @@ export async function smartNativeFetch(url, options = {}) {
 
     const _isCopilotUrl = url.includes('githubcopilot.com') || url.includes('copilot_internal');
     const _isGoogleApiUrl = url.includes('generativelanguage.googleapis.com') || url.includes('aiplatform.googleapis.com') || url.includes('oauth2.googleapis.com');
-    const _preferNativeFirst = (_isGoogleApiUrl || _isCopilotUrl) && (options.method || 'POST') !== 'GET';
+    // Copilot URLs always skip direct browser fetch (CSP blocks it in iframe sandbox).
+    // Google URLs skip only for non-GET (POST/SSE) where nativeFetch is more stable.
+    const _preferNativeFirst = (_isGoogleApiUrl && (options.method || 'POST') !== 'GET') || _isCopilotUrl;
 
     // ─── Compatibility Mode: skip nativeFetch entirely ───
     const _compatMode = await _isCompatibilityMode();
@@ -196,9 +198,11 @@ export async function smartNativeFetch(url, options = {}) {
         }
     }
 
-    // ─── Copilot-specific: nativeFetch first for POST/SSE ───
+    // ─── Copilot-specific: nativeFetch first (GET token exchange + POST/SSE chat) ───
     // Skipped in compatibility mode for the same reason as Google.
-    if (!_compatMode && _isCopilotUrl && (options.method || 'POST') !== 'GET' && Risu && typeof Risu.nativeFetch === 'function') {
+    // GET is included because the OAuth→API token exchange is a GET request
+    // that also needs nativeFetch (direct browser fetch is blocked by iframe CSP).
+    if (!_compatMode && _isCopilotUrl && Risu && typeof Risu.nativeFetch === 'function') {
         try {
             const nfOptions = { ...options };
             if (typeof nfOptions.body === 'string') {
