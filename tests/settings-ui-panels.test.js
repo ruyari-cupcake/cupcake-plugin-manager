@@ -9,6 +9,20 @@ const h = vi.hoisted(() => ({
         cpm_key2: '',
         cpm_key3: 'value-3',
     }[key] ?? '')),
+    Risu: {
+        pluginStorage: {
+            getItem: vi.fn(async () => null),
+            setItem: vi.fn(async () => {}),
+            removeItem: vi.fn(async () => {}),
+            keys: vi.fn(async () => []),
+        },
+    },
+    SubPluginManager: {
+        plugins: [],
+        unloadPlugin: vi.fn(),
+        loadRegistry: vi.fn(async () => {}),
+        executeEnabled: vi.fn(async () => {}),
+    },
     escHtml: vi.fn((s) => String(s ?? '')),
     getManagedSettingKeys: vi.fn(() => ['cpm_key1', 'cpm_key2', 'cpm_key3']),
     getAllApiRequests: vi.fn(() => []),
@@ -16,6 +30,7 @@ const h = vi.hoisted(() => ({
 }));
 
 vi.mock('../src/lib/shared-state.js', () => ({
+    Risu: h.Risu,
     safeGetArg: (...args) => h.safeGetArg(...args),
 }));
 
@@ -27,12 +42,23 @@ vi.mock('../src/lib/settings-backup.js', () => ({
     getManagedSettingKeys: (...args) => h.getManagedSettingKeys(...args),
 }));
 
+vi.mock('../src/lib/sub-plugin-manager.js', () => ({
+    SubPluginManager: h.SubPluginManager,
+}));
+
 vi.mock('../src/lib/api-request-log.js', () => ({
     getAllApiRequests: (...args) => h.getAllApiRequests(...args),
     getApiRequestById: (...args) => h.getApiRequestById(...args),
 }));
 
 import { initApiViewPanel, initExportImport } from '../src/lib/settings-ui-panels.js';
+
+const flushAsyncUi = async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    await new Promise(resolve => setTimeout(resolve, 0));
+};
 
 function mountApiViewDom() {
     document.body.innerHTML = `
@@ -183,19 +209,42 @@ describe('initExportImport', () => {
         vi.clearAllMocks();
         document.body.innerHTML = '';
         globalThis.alert = vi.fn();
+        h.Risu.pluginStorage.getItem.mockResolvedValue(null);
+        h.Risu.pluginStorage.setItem.mockResolvedValue(undefined);
+        h.Risu.pluginStorage.removeItem.mockResolvedValue(undefined);
+        h.Risu.pluginStorage.keys.mockResolvedValue([]);
+        h.SubPluginManager.plugins = [];
     });
 
-    it('exports only non-empty managed settings to a downloadable JSON file', async () => {
+    it('exports all managed settings to a downloadable JSON file, including empty values', async () => {
         document.body.innerHTML = '<button id="cpm-export-btn">export</button><button id="cpm-import-btn">import</button>';
+        const originalCreateElement = document.createElement.bind(document);
+        let capturedAnchor = null;
+        Object.defineProperty(document, 'createElement', {
+            configurable: true,
+            value(tagName, options) {
+                const el = originalCreateElement(tagName, options);
+                if (String(tagName).toLowerCase() === 'a') capturedAnchor = el;
+                return el;
+            },
+        });
+
         initExportImport(vi.fn(), vi.fn());
         document.getElementById('cpm-export-btn').click();
-        await Promise.resolve();
-        await Promise.resolve();
+        await flushAsyncUi();
 
         expect(h.getManagedSettingKeys).toHaveBeenCalled();
         expect(h.safeGetArg).toHaveBeenCalledWith('cpm_key1');
         expect(h.safeGetArg).toHaveBeenCalledWith('cpm_key2');
         expect(h.safeGetArg).toHaveBeenCalledWith('cpm_key3');
+        const exported = JSON.parse(decodeURIComponent(capturedAnchor.href.split(',')[1]));
+        expect(exported.settings).toEqual({
+            cpm_key1: 'value-1',
+            cpm_key2: '',
+            cpm_key3: 'value-3',
+        });
+
+        Object.defineProperty(document, 'createElement', { configurable: true, value: originalCreateElement });
     });
 
     it('exports safely even when managed settings contain falsey non-empty values', async () => {
@@ -210,12 +259,101 @@ describe('initExportImport', () => {
 
         initExportImport(vi.fn(), vi.fn());
         expect(() => document.getElementById('cpm-export-btn').click()).not.toThrow();
-        await Promise.resolve();
-        await Promise.resolve();
+        await flushAsyncUi();
 
         expect(h.safeGetArg).toHaveBeenCalledWith('cpm_zero');
         expect(h.safeGetArg).toHaveBeenCalledWith('cpm_false');
         expect(h.safeGetArg).toHaveBeenCalledWith('cpm_empty');
+    });
+
+    it('exports custom models with advanced fields and api keys preserved in full settings export', async () => {
+        h.getManagedSettingKeys.mockReturnValue(['cpm_custom_models']);
+        h.safeGetArg.mockResolvedValue(JSON.stringify([{
+            uniqueId: 'custom_1',
+            name: 'Model A',
+            model: 'gpt-4.1',
+            url: 'https://api.example.com/v1',
+            key: 'drop-this-key',
+            proxyUrl: 'https://proxy.example.com',
+            format: 'openai',
+            tok: 'o200k_base',
+            responsesMode: 'on',
+            thinking: 'high',
+            thinkingBudget: 1024,
+            maxOutputLimit: 2048,
+            promptCacheRetention: '24h',
+            reasoning: 'medium',
+            verbosity: 'high',
+            effort: 'low',
+            sysfirst: true,
+            mergesys: true,
+            altrole: true,
+            mustuser: true,
+            maxout: true,
+            streaming: true,
+            thought: true,
+            adaptiveThinking: true,
+            customParams: '{"temperature":0.2}',
+        }]));
+        h.Risu.pluginStorage.keys.mockResolvedValue(['cpm_installed_subplugins', 'cpm_settings_backup', 'other_key']);
+        h.Risu.pluginStorage.getItem.mockImplementation(async (key) => ({
+            cpm_installed_subplugins: '[{"id":"sp1","name":"SubA","enabled":true}]',
+            cpm_settings_backup: '{"cpm_openai_key":"sk-backup"}',
+        }[key] ?? null));
+
+        document.body.innerHTML = '<button id="cpm-export-btn">export</button><button id="cpm-import-btn">import</button>';
+
+        const originalCreateElement = document.createElement.bind(document);
+        let capturedAnchor = null;
+        Object.defineProperty(document, 'createElement', {
+            configurable: true,
+            value(tagName, options) {
+                const el = originalCreateElement(tagName, options);
+                if (String(tagName).toLowerCase() === 'a') capturedAnchor = el;
+                return el;
+            },
+        });
+
+        initExportImport(vi.fn(), vi.fn());
+        document.getElementById('cpm-export-btn').click();
+        await flushAsyncUi();
+
+        const exported = JSON.parse(decodeURIComponent(capturedAnchor.href.split(',')[1]));
+        const exportedModels = JSON.parse(exported.settings.cpm_custom_models);
+        expect(exportedModels[0]).toMatchObject({
+            uniqueId: 'custom_1',
+            name: 'Model A',
+            model: 'gpt-4.1',
+            url: 'https://api.example.com/v1',
+            key: 'drop-this-key',
+            proxyUrl: 'https://proxy.example.com',
+            format: 'openai',
+            tok: 'o200k_base',
+            responsesMode: 'on',
+            thinking: 'high',
+            thinkingBudget: 1024,
+            maxOutputLimit: 2048,
+            promptCacheRetention: '24h',
+            reasoning: 'medium',
+            verbosity: 'high',
+            effort: 'low',
+            sysfirst: true,
+            mergesys: true,
+            altrole: true,
+            mustuser: true,
+            maxout: true,
+            streaming: true,
+            decoupled: false,
+            thought: true,
+            adaptiveThinking: true,
+            customParams: '{"temperature":0.2}',
+        });
+        expect(exported.pluginStorage).toEqual({
+            cpm_installed_subplugins: '[{"id":"sp1","name":"SubA","enabled":true}]',
+            cpm_settings_backup: '{"cpm_openai_key":"sk-backup"}',
+        });
+
+        Object.defineProperty(document, 'createElement', { configurable: true, value: originalCreateElement });
     });
 
     it('does nothing when import is opened but no file is selected', () => {
@@ -242,7 +380,7 @@ describe('initExportImport', () => {
         Object.defineProperty(document, 'createElement', { configurable: true, value: originalCreateElement });
     });
 
-    it('imports JSON settings, updates checkbox/text fields, and reopens settings', async () => {
+    it('imports JSON settings from the new export envelope, updates fields, and reopens settings', async () => {
         document.body.innerHTML = `
             <button id="cpm-export-btn">export</button>
             <button id="cpm-import-btn">import</button>
@@ -267,7 +405,7 @@ describe('initExportImport', () => {
 
         class MockFileReader {
             readAsText() {
-                this.onload({ target: { result: '{"cpm_flag":true,"cpm_text":"hello"}' } });
+                this.onload({ target: { result: '{"_cpmExportVersion":2,"settings":{"cpm_flag":true,"cpm_text":"hello"},"pluginStorage":{}}' } });
             }
         }
         vi.stubGlobal('FileReader', MockFileReader);
@@ -276,8 +414,7 @@ describe('initExportImport', () => {
         document.getElementById('cpm-import-btn').click();
         Object.defineProperty(createdInput, 'files', { value: [{ name: 'settings.json' }], configurable: true });
         createdInput.onchange({ target: createdInput });
-        await Promise.resolve();
-        await Promise.resolve();
+        await flushAsyncUi();
 
         expect(setVal).toHaveBeenCalledWith('cpm_flag', true);
         expect(setVal).toHaveBeenCalledWith('cpm_text', 'hello');
@@ -285,6 +422,161 @@ describe('initExportImport', () => {
         expect(document.getElementById('cpm_text').value).toBe('hello');
         expect(globalThis.alert).toHaveBeenCalledWith('설정을 성공적으로 불러왔습니다!');
         expect(reopen).toHaveBeenCalled();
+        Object.defineProperty(document, 'createElement', { configurable: true, value: originalCreateElement });
+    });
+
+    it('normalizes imported custom models so advanced settings and api keys survive', async () => {
+        document.body.innerHTML = `
+            <button id="cpm-export-btn">export</button>
+            <button id="cpm-import-btn">import</button>
+            <input id="cpm_custom_models" type="text">
+        `;
+        const setVal = vi.fn();
+        const reopen = vi.fn();
+        let createdInput = null;
+        const originalCreateElement = document.createElement.bind(document);
+        Object.defineProperty(document, 'createElement', {
+            configurable: true,
+            value(tagName, options) {
+                const el = originalCreateElement(tagName, options);
+                if (String(tagName).toLowerCase() === 'input') {
+                    createdInput = el;
+                    el.click = vi.fn();
+                }
+                return el;
+            },
+        });
+
+        class MockFileReader {
+            readAsText() {
+                this.onload({ target: { result: JSON.stringify({
+                    _cpmExportVersion: 2,
+                    settings: {
+                        cpm_custom_models: [{
+                            name: 'Imported',
+                            model: 'gpt-4.1-mini',
+                            url: 'https://api.example.com/v1',
+                            key: 'keep-me',
+                            proxyUrl: 'https://proxy.example.com',
+                            format: 'google',
+                            tok: 'gemma',
+                            responsesMode: 'off',
+                            thinking: 'medium',
+                            thinkingBudget: 3072,
+                            maxOutputLimit: 6144,
+                            promptCacheRetention: 'in_memory',
+                            reasoning: 'high',
+                            verbosity: 'low',
+                            effort: 'medium',
+                            sysfirst: true,
+                            mergesys: true,
+                            altrole: true,
+                            mustuser: true,
+                            maxout: true,
+                            streaming: true,
+                            thought: true,
+                            adaptiveThinking: true,
+                            customParams: '{"temperature":0.6}',
+                        }],
+                    },
+                    pluginStorage: {},
+                }) } });
+            }
+        }
+        vi.stubGlobal('FileReader', MockFileReader);
+
+        initExportImport(setVal, reopen);
+        document.getElementById('cpm-import-btn').click();
+        Object.defineProperty(createdInput, 'files', { value: [{ name: 'settings.json' }], configurable: true });
+        createdInput.onchange({ target: createdInput });
+        await flushAsyncUi();
+
+        expect(setVal).toHaveBeenCalledTimes(1);
+        const [, normalizedValue] = setVal.mock.calls[0];
+        const importedModels = JSON.parse(normalizedValue);
+        expect(importedModels[0]).toMatchObject({
+            name: 'Imported',
+            model: 'gpt-4.1-mini',
+            url: 'https://api.example.com/v1',
+            proxyUrl: 'https://proxy.example.com',
+            format: 'google',
+            tok: 'gemma',
+            responsesMode: 'off',
+            thinking: 'medium',
+            thinkingBudget: 3072,
+            maxOutputLimit: 6144,
+            promptCacheRetention: 'in_memory',
+            reasoning: 'high',
+            verbosity: 'low',
+            effort: 'medium',
+            sysfirst: true,
+            mergesys: true,
+            altrole: true,
+            mustuser: true,
+            maxout: true,
+            streaming: true,
+            decoupled: false,
+            thought: true,
+            adaptiveThinking: true,
+            customParams: '{"temperature":0.6}',
+        });
+        expect(importedModels[0].key).toBe('keep-me');
+        expect(document.getElementById('cpm_custom_models').value).toBe(normalizedValue);
+        expect(reopen).toHaveBeenCalled();
+
+        Object.defineProperty(document, 'createElement', { configurable: true, value: originalCreateElement });
+    });
+
+    it('imports CPM pluginStorage snapshot including sub-plugin registry and executes imported plugins', async () => {
+        document.body.innerHTML = '<button id="cpm-export-btn">export</button><button id="cpm-import-btn">import</button>';
+        const setVal = vi.fn();
+        const reopen = vi.fn();
+        h.Risu.pluginStorage.keys.mockResolvedValue(['cpm_installed_subplugins', 'cpm_old_key']);
+        h.SubPluginManager.plugins = [{ id: 'old-plugin' }];
+
+        let createdInput = null;
+        const originalCreateElement = document.createElement.bind(document);
+        Object.defineProperty(document, 'createElement', {
+            configurable: true,
+            value(tagName, options) {
+                const el = originalCreateElement(tagName, options);
+                if (String(tagName).toLowerCase() === 'input') {
+                    createdInput = el;
+                    el.click = vi.fn();
+                }
+                return el;
+            },
+        });
+
+        class MockFileReader {
+            readAsText() {
+                this.onload({ target: { result: JSON.stringify({
+                    _cpmExportVersion: 2,
+                    settings: {},
+                    pluginStorage: {
+                        cpm_installed_subplugins: '[{"id":"sp1","name":"Imported Sub","enabled":true}]',
+                        cpm_settings_backup: '{"cpm_openai_key":"sk-123"}',
+                    },
+                }) } });
+            }
+        }
+        vi.stubGlobal('FileReader', MockFileReader);
+
+        initExportImport(setVal, reopen);
+        document.getElementById('cpm-import-btn').click();
+        Object.defineProperty(createdInput, 'files', { value: [{ name: 'settings.json' }], configurable: true });
+        createdInput.onchange({ target: createdInput });
+        await flushAsyncUi();
+
+        const removedKeys = h.Risu.pluginStorage.removeItem.mock.calls.map(call => call[0]);
+        expect(removedKeys).toContain('cpm_old_key');
+        expect(h.Risu.pluginStorage.setItem).toHaveBeenCalledWith('cpm_installed_subplugins', '[{"id":"sp1","name":"Imported Sub","enabled":true}]');
+        expect(h.Risu.pluginStorage.setItem).toHaveBeenCalledWith('cpm_settings_backup', '{"cpm_openai_key":"sk-123"}');
+        expect(h.SubPluginManager.unloadPlugin).toHaveBeenCalledWith('old-plugin');
+        expect(h.SubPluginManager.loadRegistry).toHaveBeenCalled();
+        expect(h.SubPluginManager.executeEnabled).toHaveBeenCalled();
+        expect(reopen).toHaveBeenCalled();
+
         Object.defineProperty(document, 'createElement', { configurable: true, value: originalCreateElement });
     });
 

@@ -433,7 +433,34 @@ describe('initCustomModelsManager', () => {
         const { initCustomModelsManager } = await import('../src/lib/settings-ui-custom-models.js');
 
         mockState.CUSTOM_MODELS_CACHE = [
-            { uniqueId: 'exp1', name: 'Export Me', model: 'gpt-4', url: 'http://x', key: 'secret-key', format: 'openai' },
+            {
+                uniqueId: 'exp1',
+                name: 'Export Me',
+                model: 'gpt-4',
+                url: 'http://x',
+                key: 'secret-key',
+                proxyUrl: 'https://proxy.example.com',
+                format: 'openai',
+                tok: 'o200k_base',
+                responsesMode: 'on',
+                thinking: 'MEDIUM',
+                thinkingBudget: 2048,
+                maxOutputLimit: 4096,
+                promptCacheRetention: 'in_memory',
+                reasoning: 'medium',
+                verbosity: 'high',
+                effort: 'high',
+                sysfirst: true,
+                mergesys: true,
+                altrole: true,
+                mustuser: true,
+                maxout: true,
+                streaming: true,
+                decoupled: false,
+                thought: true,
+                adaptiveThinking: true,
+                customParams: '{"temperature":0.7}',
+            },
         ];
         initCustomModelsManager(vi.fn(), vi.fn());
 
@@ -449,10 +476,121 @@ describe('initCustomModelsManager', () => {
         document.querySelector('.cpm-cm-export-btn').click();
 
         expect(capturedAnchor).not.toBeNull();
-        // Verify the export data doesn't contain the key
-        expect(capturedAnchor.href).toContain('Export%20Me');
-        expect(capturedAnchor.href).not.toContain('secret-key');
+        const exported = JSON.parse(decodeURIComponent(capturedAnchor.href.split(',')[1]));
+        expect(exported).toMatchObject({
+            name: 'Export Me',
+            model: 'gpt-4',
+            url: 'http://x',
+            proxyUrl: 'https://proxy.example.com',
+            format: 'openai',
+            tok: 'o200k_base',
+            responsesMode: 'on',
+            thinking: 'MEDIUM',
+            thinkingBudget: 2048,
+            maxOutputLimit: 4096,
+            promptCacheRetention: 'in_memory',
+            reasoning: 'medium',
+            verbosity: 'high',
+            effort: 'high',
+            sysfirst: true,
+            mergesys: true,
+            altrole: true,
+            mustuser: true,
+            maxout: true,
+            streaming: true,
+            decoupled: false,
+            thought: true,
+            adaptiveThinking: true,
+            customParams: '{"temperature":0.7}',
+            _cpmModelExport: true,
+        });
+        expect(exported.key).toBeUndefined();
         expect(capturedAnchor.download).toContain('.cpm-model.json');
+    });
+
+    it('import restores url and advanced options while keeping api key empty', async () => {
+        const { initCustomModelsManager } = await import('../src/lib/settings-ui-custom-models.js');
+
+        let createdInput = null;
+        const originalCreateElement = document.createElement.bind(document);
+        Object.defineProperty(document, 'createElement', {
+            configurable: true,
+            value(tagName, options) {
+                const el = originalCreateElement(tagName, options);
+                if (String(tagName).toLowerCase() === 'input') {
+                    createdInput = el;
+                    el.click = vi.fn();
+                }
+                return el;
+            },
+        });
+
+        initCustomModelsManager(vi.fn(), vi.fn());
+        document.getElementById('cpm-import-model-btn').click();
+        Object.defineProperty(createdInput, 'files', {
+            configurable: true,
+            value: [{
+                text: async () => JSON.stringify({
+                    _cpmModelExport: true,
+                    name: 'Imported Model',
+                    model: 'gpt-4.1',
+                    url: 'https://api.example.com/v1',
+                    proxyUrl: 'https://proxy.example.com',
+                    format: 'anthropic',
+                    tok: 'llama3',
+                    responsesMode: 'on',
+                    thinking: 'MEDIUM',
+                    thinkingBudget: 8192,
+                    maxOutputLimit: 16384,
+                    promptCacheRetention: 'in_memory',
+                    reasoning: 'medium',
+                    verbosity: 'high',
+                    effort: 'high',
+                    sysfirst: true,
+                    mergesys: true,
+                    altrole: true,
+                    mustuser: true,
+                    maxout: true,
+                    streaming: true,
+                    thought: true,
+                    adaptiveThinking: true,
+                    customParams: '{"top_p":0.9}',
+                }),
+            }],
+        });
+
+        await createdInput.onchange({ target: createdInput });
+
+        expect(mockState.CUSTOM_MODELS_CACHE).toHaveLength(1);
+        expect(mockState.CUSTOM_MODELS_CACHE[0]).toMatchObject({
+            name: 'Imported Model',
+            model: 'gpt-4.1',
+            url: 'https://api.example.com/v1',
+            proxyUrl: 'https://proxy.example.com',
+            format: 'anthropic',
+            tok: 'llama3',
+            responsesMode: 'on',
+            thinking: 'MEDIUM',
+            thinkingBudget: 8192,
+            maxOutputLimit: 16384,
+            promptCacheRetention: 'in_memory',
+            reasoning: 'medium',
+            verbosity: 'high',
+            effort: 'high',
+            sysfirst: true,
+            mergesys: true,
+            altrole: true,
+            mustuser: true,
+            maxout: true,
+            streaming: true,
+            decoupled: false,
+            thought: true,
+            adaptiveThinking: true,
+            customParams: '{"top_p":0.9}',
+            key: '',
+        });
+
+        Object.defineProperty(document, 'createElement', { configurable: true, value: originalCreateElement });
     });
 
     it('export button skips when index is out of range', async () => {

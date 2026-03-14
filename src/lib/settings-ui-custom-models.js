@@ -6,6 +6,7 @@
  */
 import { Risu, state } from './shared-state.js';
 import { SettingsBackup } from './settings-backup.js';
+import { normalizeCustomModel, serializeCustomModelExport } from './custom-model-serialization.js';
 import { escHtml } from './helpers.js';
 
 /** @typedef {HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement} FormField */
@@ -154,7 +155,7 @@ export function clearEditor() {
 // ── Read all editor values into a model object ──
 /** @param {string} uid */
 export function readEditorValues(uid) {
-    return {
+    return normalizeCustomModel({
         uniqueId: uid,
         name: getField('cpm-cm-name').value,
         model: getField('cpm-cm-model').value,
@@ -181,7 +182,7 @@ export function readEditorValues(uid) {
         thought: getCheckbox('cpm-cm-thought').checked,
         adaptiveThinking: getCheckbox('cpm-cm-adaptive-thinking').checked,
         customParams: getField('cpm-cm-custom-params').value,
-    };
+    });
 }
 
 // ── Custom Models Manager logic ──
@@ -220,7 +221,7 @@ export function initCustomModelsManager(_setVal, _openCpmSettings) {
             const idx = getDatasetIndex(e.target);
             const m = /** @type {Record<string, any>} */ (state.CUSTOM_MODELS_CACHE[idx]);
             if (!m) return;
-            const exportModel = /** @type {Record<string, any>} */ ({ ...m }); delete exportModel.key; exportModel._cpmModelExport = true;
+            const exportModel = serializeCustomModelExport(m);
             const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(exportModel, null, 2));
             const a = document.createElement('a'); a.href = dataStr;
             a.download = `${(m.name || 'custom_model').replace(/[^a-zA-Z0-9가-힣_-]/g, '_')}.cpm-model.json`;
@@ -258,9 +259,9 @@ export function initCustomModelsManager(_setVal, _openCpmSettings) {
                 try {
                     const data = JSON.parse(await file.text());
                     if (!data._cpmModelExport || !data.name) { errorCount++; continue; }
-                    data.uniqueId = 'custom_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
-                    delete data._cpmModelExport; if (!data.key) data.key = '';
-                    state.CUSTOM_MODELS_CACHE.push(data); importedCount++;
+                    const normalized = normalizeCustomModel(data, { includeKey: true, includeUniqueId: false, includeTag: false });
+                    normalized.uniqueId = 'custom_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
+                    state.CUSTOM_MODELS_CACHE.push(normalized); importedCount++;
                 } catch { errorCount++; }
             }
             if (importedCount > 0) {

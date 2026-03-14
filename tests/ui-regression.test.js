@@ -503,8 +503,9 @@ describe('UI regression — settings export/import', () => {
 
         document.createElement = originalCreateElement;
         const exported = JSON.parse(decodeURIComponent(capturedAnchor.href.split(',')[1]));
-        expect(exported.cpm_fallback_temp).toBe('0.55');
-        expect(exported.cpm_custom_tab_key).toBe('enabled');
+        expect(exported._cpmExportVersion).toBe(2);
+        expect(exported.settings.cpm_fallback_temp).toBe('0.55');
+        expect(exported.settings.cpm_custom_tab_key).toBe('enabled');
         expect(capturedAnchor.download).toBe('cupcake_pm_settings.json');
     });
 
@@ -537,8 +538,12 @@ describe('UI regression — settings export/import', () => {
             target: {
                 files: [{
                     __text: JSON.stringify({
-                        cpm_fallback_temp: '0.25',
-                        cpm_show_token_usage: true,
+                        _cpmExportVersion: 2,
+                        settings: {
+                            cpm_fallback_temp: '0.25',
+                            cpm_show_token_usage: true,
+                        },
+                        pluginStorage: {},
                     }),
                 }],
             },

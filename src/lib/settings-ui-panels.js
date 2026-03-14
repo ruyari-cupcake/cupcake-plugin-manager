@@ -3,13 +3,92 @@
  * settings-ui-panels.js — API View panel + Export/Import.
  * Extracted from settings-ui.js for modularity.
  */
-import { safeGetArg } from './shared-state.js';
+import { Risu, safeGetArg } from './shared-state.js';
 import { escHtml } from './helpers.js';
+import { serializeCustomModelsSetting } from './custom-model-serialization.js';
 import { getManagedSettingKeys } from './settings-backup.js';
+import { SubPluginManager } from './sub-plugin-manager.js';
 import {
     getAllApiRequests as _getAllApiRequests,
     getApiRequestById as _getApiRequestById,
 } from './api-request-log.js';
+
+const CPM_EXPORT_VERSION = 2;
+const CPM_PLUGIN_STORAGE_KEY_PATTERN = /^cpm[_-]/;
+const KNOWN_CPM_PLUGIN_STORAGE_KEYS = [
+    'cpm_installed_subplugins',
+    'cpm_settings_backup',
+    'cpm_last_version_check',
+    'cpm_last_main_version_check',
+    'cpm_pending_main_update',
+    'cpm_last_boot_status',
+    'cpm_last_main_update_flush',
+];
+
+/**
+ * @param {string} key
+ * @param {any} value
+ */
+function normalizeManagedSettingValue(key, value) {
+    return key === 'cpm_custom_models'
+        ? serializeCustomModelsSetting(value, { includeKey: true })
+        : (value ?? '');
+}
+
+async function getCpmPluginStorageKeys() {
+    const keySet = new Set(KNOWN_CPM_PLUGIN_STORAGE_KEYS);
+    try {
+        if (typeof Risu?.pluginStorage?.keys === 'function') {
+            const dynamicKeys = await Risu.pluginStorage.keys();
+            for (const key of dynamicKeys || []) {
+                if (CPM_PLUGIN_STORAGE_KEY_PATTERN.test(String(key))) keySet.add(String(key));
+            }
+        }
+    } catch (_) { /* ignore */ }
+    return [...keySet];
+}
+
+async function exportPluginStorageSnapshot() {
+    const snapshot = /** @type {Record<string, any>} */ ({});
+    for (const key of await getCpmPluginStorageKeys()) {
+        try {
+            const value = await Risu.pluginStorage.getItem(key);
+            if (value !== undefined && value !== null) snapshot[key] = value;
+        } catch (_) { /* ignore */ }
+    }
+    return snapshot;
+}
+
+/** @param {Record<string, any>} snapshot */
+async function importPluginStorageSnapshot(snapshot) {
+    const existingKeys = await getCpmPluginStorageKeys();
+    for (const key of existingKeys) {
+        if (Object.prototype.hasOwnProperty.call(snapshot, key)) continue;
+        try {
+            if (typeof Risu.pluginStorage.removeItem === 'function') await Risu.pluginStorage.removeItem(key);
+            else await Risu.pluginStorage.setItem(key, '');
+        } catch (_) { /* ignore */ }
+    }
+
+    for (const [key, value] of Object.entries(snapshot)) {
+        if (!CPM_PLUGIN_STORAGE_KEY_PATTERN.test(key)) continue;
+        await Risu.pluginStorage.setItem(key, String(value ?? ''));
+    }
+}
+
+/** @param {any} importedData */
+function normalizeImportEnvelope(importedData) {
+    if (!importedData || typeof importedData !== 'object' || Array.isArray(importedData)) {
+        throw new Error('설정 파일 형식이 올바르지 않습니다.');
+    }
+    if ('settings' in importedData || 'pluginStorage' in importedData || '_cpmExportVersion' in importedData) {
+        return {
+            settings: importedData.settings && typeof importedData.settings === 'object' ? importedData.settings : {},
+            pluginStorage: importedData.pluginStorage && typeof importedData.pluginStorage === 'object' ? importedData.pluginStorage : {},
+        };
+    }
+    return { settings: importedData, pluginStorage: {} };
+}
 
 // ── API View Panel ──
 export function initApiViewPanel() {
@@ -79,11 +158,17 @@ export function initApiViewPanel() {
 // ── Export/Import ──
 export function initExportImport(/** @type {any} */ setVal, /** @type {any} */ openCpmSettings) {
     document.getElementById('cpm-export-btn')?.addEventListener('click', async () => {
-        const exportData = /** @type {Record<string, any>} */ ({});
+        const exportSettings = /** @type {Record<string, any>} */ ({});
         for (const key of getManagedSettingKeys()) {
             const val = await safeGetArg(key);
-            if (val !== undefined && val !== '') exportData[key] = val;
+            exportSettings[key] = normalizeManagedSettingValue(key, val);
         }
+        const exportData = {
+            _cpmExportVersion: CPM_EXPORT_VERSION,
+            exportedAt: new Date().toISOString(),
+            settings: exportSettings,
+            pluginStorage: await exportPluginStorageSnapshot(),
+        };
         const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(exportData, null, 2));
         const a = document.createElement('a'); a.href = dataStr; a.download = 'cupcake_pm_settings.json';
         document.body.appendChild(a); a.click(); a.remove();
@@ -101,14 +186,27 @@ export function initExportImport(/** @type {any} */ setVal, /** @type {any} */ o
                     const rawText = event.target?.result;
                     if (typeof rawText !== 'string') throw new Error('설정 파일 형식이 올바르지 않습니다.');
                     const importedData = JSON.parse(rawText);
-                    for (const [key, value] of Object.entries(importedData)) {
-                        await setVal(key, value);
+                    const envelope = normalizeImportEnvelope(importedData);
+                    for (const [key, value] of Object.entries(envelope.settings)) {
+                        const normalizedValue = normalizeManagedSettingValue(key, value);
+                        await setVal(key, normalizedValue);
                         /** @type {HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | null} */
                         const el = /** @type {HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | null} */ (document.getElementById(key));
                         if (el) {
-                            if ('type' in el && el.type === 'checkbox') /** @type {HTMLInputElement} */ (el).checked = (value === true || String(value).toLowerCase() === 'true');
-                            else el.value = String(value ?? '');
+                            if ('type' in el && el.type === 'checkbox') /** @type {HTMLInputElement} */ (el).checked = (normalizedValue === true || String(normalizedValue).toLowerCase() === 'true');
+                            else el.value = String(normalizedValue ?? '');
                         }
+                    }
+                    const prevPluginIds = Array.isArray(SubPluginManager.plugins) ? SubPluginManager.plugins.map(p => p.id) : [];
+                    await importPluginStorageSnapshot(envelope.pluginStorage || {});
+                    for (const pluginId of prevPluginIds) {
+                        try { SubPluginManager.unloadPlugin(pluginId); } catch (_) { /* ignore */ }
+                    }
+                    if (Object.prototype.hasOwnProperty.call(envelope.pluginStorage || {}, 'cpm_installed_subplugins')) {
+                        try {
+                            await SubPluginManager.loadRegistry();
+                            if (typeof SubPluginManager.executeEnabled === 'function') await SubPluginManager.executeEnabled();
+                        } catch (_) { /* ignore */ }
                     }
                     alert('설정을 성공적으로 불러왔습니다!');
                     openCpmSettings();

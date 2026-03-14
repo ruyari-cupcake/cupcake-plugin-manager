@@ -318,6 +318,62 @@ describe('init.js full boot — model registration path', () => {
         expect(c2.format).toBe('openai'); // default
     });
 
+    it('normalizes persisted custom models loaded from cpm_custom_models JSON', async () => {
+        h.mockArgStore['cpm_custom_models'] = JSON.stringify([
+            {
+                uniqueId: 'custom_saved',
+                name: 'Saved Model',
+                model: 'gpt-4.1-mini',
+                url: 'https://api.example.com/v1',
+                key: 'keep-on-boot',
+                proxyUrl: ' https://proxy.example.com ',
+                responsesMode: 'on',
+                thinkingBudget: '2048',
+                maxOutputLimit: '4096',
+                promptCacheRetention: '24h',
+                sysfirst: 'true',
+                mergesys: 'true',
+                altrole: 'false',
+                mustuser: 'true',
+                maxout: 'true',
+                decoupled: 'false',
+                thought: 'true',
+                adaptiveThinking: 'true',
+                customParams: '{"top_p":0.9}',
+            },
+        ]);
+
+        await import('../src/lib/init.js');
+        await tick(200);
+
+        expect(h.mockState.CUSTOM_MODELS_CACHE).toHaveLength(1);
+        expect(h.mockState.CUSTOM_MODELS_CACHE[0]).toMatchObject({
+            uniqueId: 'custom_saved',
+            name: 'Saved Model',
+            model: 'gpt-4.1-mini',
+            url: 'https://api.example.com/v1',
+            key: 'keep-on-boot',
+            proxyUrl: 'https://proxy.example.com',
+            format: 'openai',
+            tok: 'o200k_base',
+            responsesMode: 'on',
+            thinking: 'none',
+            thinkingBudget: 2048,
+            maxOutputLimit: 4096,
+            promptCacheRetention: '24h',
+            sysfirst: true,
+            mergesys: true,
+            altrole: false,
+            mustuser: true,
+            maxout: true,
+            streaming: true,
+            decoupled: false,
+            thought: true,
+            adaptiveThinking: true,
+            customParams: '{"top_p":0.9}',
+        });
+    });
+
     it('silent update check handles retryPendingMainPluginUpdateOnBoot throwing', async () => {
         vi.useFakeTimers();
         const { SubPluginManager } = await import('../src/lib/sub-plugin-manager.js');

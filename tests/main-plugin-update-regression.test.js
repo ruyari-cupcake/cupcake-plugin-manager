@@ -119,11 +119,19 @@ describe('main plugin update regression guard', () => {
     });
 
     it('registers the settings panel before risky init phases in the shipped bundle', () => {
-        const registerSettingIndex = distBundle.indexOf('await Risu.registerSetting(');
-        const loadRegistryIndex = distBundle.indexOf('await SubPluginManager.loadRegistry()');
-        const executeEnabledIndex = distBundle.indexOf('await SubPluginManager.executeEnabled()');
-        const restoreSettingsIndex = distBundle.indexOf('await SettingsBackup.load()');
-        const fallbackRegisterIndex = distBundle.indexOf('⚠️ CPM v${CPM_VERSION} (Error)');
+        // The init IIFE scope starts around the _bootPhase variable.
+        // We scope our search to the init IIFE section to avoid matching
+        // identical strings that appear in non-init helper functions
+        // (e.g. settings import/restore reloading sub-plugins).
+        const initIIFEStart = distBundle.indexOf("_bootPhase = 'pre-init'");
+        expect(initIIFEStart).toBeGreaterThan(-1);
+
+        const initSection = distBundle.substring(initIIFEStart);
+        const registerSettingIndex = initSection.indexOf('await Risu.registerSetting(');
+        const loadRegistryIndex = initSection.indexOf('await SubPluginManager.loadRegistry()');
+        const executeEnabledIndex = initSection.indexOf('await SubPluginManager.executeEnabled()');
+        const restoreSettingsIndex = initSection.indexOf('await SettingsBackup.load()');
+        const fallbackRegisterIndex = initSection.indexOf('⚠️ CPM v${CPM_VERSION} (Error)');
 
         expect(registerSettingIndex).toBeGreaterThan(-1);
         expect(loadRegistryIndex).toBeGreaterThan(-1);
