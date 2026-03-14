@@ -13,7 +13,7 @@
  *   - checkVersionsQuiet: full manifest flow, no updates, main update detection
  *   - checkMainPluginVersionQuiet: nativeFetch success, risuFetch fallback, version up to date
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // ── Mocks (hoisted for vi.mock factories) ──
 

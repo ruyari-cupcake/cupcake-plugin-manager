@@ -20,7 +20,7 @@ describe('sanitize.js branches — Round 17', () => {
     it('stripStaleAutoCaption with bracket content that has < 3 words keeps bracket', () => {
         const text = 'Check this image [AB CD]';
         // < 3 alphabetic words in brackets — should keep (but bracket is only 2 words)
-        const result = stripStaleAutoCaption(text, {});
+        stripStaleAutoCaption(text, {});
         // Actually needs 7+ chars in bracket to match regex, so try a longer one
         const text2 = 'Check this image [12, 34, 56, 78]';
         const result2 = stripStaleAutoCaption(text2, {});

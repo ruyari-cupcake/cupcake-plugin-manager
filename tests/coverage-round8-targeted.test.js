@@ -27,7 +27,7 @@ import {
 } from '../src/lib/stream-builders.js';
 
 // ─── slot-inference ───
-import { scoreSlotHeuristic, CPM_SLOT_LIST } from '../src/lib/slot-inference.js';
+import { scoreSlotHeuristic } from '../src/lib/slot-inference.js';
 
 // For inferSlot, we need to mock safeGetArg. Import inferSlot after vi.mock.
 const { mockSafeGetArg } = vi.hoisted(() => {

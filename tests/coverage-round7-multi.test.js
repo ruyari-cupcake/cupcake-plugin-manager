@@ -3,10 +3,10 @@
  * Coverage Round 7 — Multi-file branch coverage targeting.
  * Targets: aws-signer, format-gemini, key-pool, token-usage, slot-inference, sse-parsers
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 
 // ─── aws-signer ───
-import { guessServiceRegion, AwsV4Signer, buf2hex, encodeRfc3986 } from '../src/lib/aws-signer.js';
+import { guessServiceRegion, AwsV4Signer } from '../src/lib/aws-signer.js';
 
 // ─── format-gemini ───
 import { validateGeminiParams, buildGeminiThinkingConfig, formatToGemini, ThoughtSignatureCache } from '../src/lib/format-gemini.js';
@@ -835,7 +835,7 @@ describe('parseGeminiSSELine edge cases', () => {
 
     it('thought signature capture with useThoughtSignature', () => {
         const config = /** @type {any} */ ({ useThoughtSignature: true });
-        const result = parseGeminiSSELine(
+        parseGeminiSSELine(
             `data: ${JSON.stringify({ candidates: [{ content: { parts: [{ text: 'response text', thought_signature: 'sig123' }] } }] })}`,
             config
         );

@@ -175,7 +175,7 @@ describe('OpenAI provider — non-streaming success paths', () => {
         const fetchImpl = vi.fn().mockResolvedValueOnce(
             makeJsonResponse({ choices: [{ message: { content: 'gpt5-ok' } }] })
         );
-        const { provider, CupcakePM } = installProvider('cpm-provider-openai.js', {
+        const { provider } = installProvider('cpm-provider-openai.js', {
             safeArgs: { cpm_openai_url: 'https://api.openai.com/v1/chat/completions' },
             fetchImpl,
         });
@@ -236,7 +236,7 @@ describe('OpenAI provider — non-streaming success paths', () => {
         const fetchImpl = vi.fn().mockResolvedValueOnce(
             makeJsonResponse({ choices: [{ message: { content: 'copilot-ok' } }] })
         );
-        const { provider, windowObj } = installProvider('cpm-provider-openai.js', {
+        const { provider } = installProvider('cpm-provider-openai.js', {
             safeArgs: {
                 cpm_openai_url: 'https://api.githubcopilot.com/chat/completions',
                 tools_githubCopilotToken: 'ghu_test123',
@@ -267,7 +267,7 @@ describe('Anthropic provider — non-streaming & thinking', () => {
         const fetchImpl = vi.fn().mockResolvedValueOnce(
             makeJsonResponse({ content: [{ type: 'text', text: 'hello from claude' }] })
         );
-        const { provider, CupcakePM } = installProvider('cpm-provider-anthropic.js', {
+        const { provider } = installProvider('cpm-provider-anthropic.js', {
             safeArgs: { cpm_anthropic_url: 'https://api.anthropic.com/v1/messages' },
             fetchImpl,
             formatToAnthropicResult: { messages: [{ role: 'user', content: 'hello' }], system: 'be helpful' },
@@ -667,7 +667,7 @@ describe('AWS provider — credentials & model normalization', () => {
             data: JSON.stringify({ content: [{ type: 'text', text: 'aws-ok' }] }),
         });
 
-        const { provider, CupcakePM } = installProvider('cpm-provider-aws.js', {
+        const { provider } = installProvider('cpm-provider-aws.js', {
             safeArgs: {
                 cpm_aws_key: 'AKIAIOSFODNN7EXAMPLE',
                 cpm_aws_secret: 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',

@@ -5,7 +5,7 @@
  * Uncovered lines: 50,59,62,63,79,83,113,161,172,173,178,179
  * Target: ~20 previously uncovered branches.
  */
-import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
+import { describe, expect, it, vi, beforeEach } from 'vitest';
 
 vi.mock('../src/lib/shared-state.js', () => ({
     Risu: {
@@ -157,7 +157,7 @@ describe('createSSEStream targeted branches', () => {
             completeCalled = true;
             return 'FINAL';
         });
-        const result = await drainStream(stream);
+        await drainStream(stream);
         expect(completeCalled).toBe(true);
     });
 
@@ -176,7 +176,6 @@ describe('createSSEStream targeted branches', () => {
     it('fires cancel callback with log', async () => {
         let logCalled = false;
         setApiRequestLogger((_id, _u) => { logCalled = true; });
-        const response = makeFetchResponse(['data: hi\n\n']);
         let resolveWait;
         const waitPromise = new Promise(r => { resolveWait = r; });
         let ci = 0;

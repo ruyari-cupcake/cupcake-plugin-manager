@@ -4,7 +4,7 @@
  *
  * Target: ~30+ previously uncovered branches in these modules.
  */
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('../src/lib/shared-state.js', () => ({
     Risu: {
@@ -29,7 +29,6 @@ import {
     stripInternalTags,
     stripStaleAutoCaption,
     extractNormalizedMessagePayload,
-    sanitizeMessages,
     sanitizeBodyJSON,
     stripThoughtDisplayContent,
     isInlaySceneWrapperText,

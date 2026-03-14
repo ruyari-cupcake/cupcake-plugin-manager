@@ -64,38 +64,6 @@ function makeOkJsonResponse(body, status = 200) {
     };
 }
 
-function makeErrorResponse(status, body = 'error') {
-    return {
-        ok: false,
-        status,
-        headers: { get: () => 'text/plain' },
-        text: async () => body,
-    };
-}
-
-function makeStreamResponse(body, status = 200) {
-    return {
-        ok: true,
-        status,
-        headers: { get: () => 'text/event-stream' },
-        text: async () => body,
-        json: async () => JSON.parse(body),
-        body: {
-            getReader: () => {
-                let done = false;
-                return {
-                    read: async () => {
-                        if (done) return { done: true, value: undefined };
-                        done = true;
-                        return { done: false, value: new TextEncoder().encode(body) };
-                    },
-                    cancel: vi.fn(),
-                };
-            },
-        },
-    };
-}
-
 const BASIC_MESSAGES = [
     { role: 'system', content: 'You are helpful.' },
     { role: 'user', content: 'Hello!' },
@@ -395,7 +363,7 @@ describe('fetchCustom — Responses API edge cases', () => {
             })
         );
 
-        const result = await fetchCustom(
+        await fetchCustom(
             {
                 url: 'https://api.githubcopilot.com/chat/completions',
                 key: 'cop-token',

@@ -4,7 +4,7 @@
  *
  * Target: ~35+ uncovered branches.
  */
-import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
+import { describe, expect, it, vi, beforeEach } from 'vitest';
 
 // ─── Mock shared-state ───
 
@@ -159,7 +159,7 @@ describe('createSSEStream branches', () => {
 
     it('cancel method logs and cancels reader', async () => {
         let logCalled = false;
-        setApiRequestLogger((_, updates) => { logCalled = true; });
+        setApiRequestLogger((_, _updates) => { logCalled = true; });
         const response = makeFetchResponse(['data: hello\n']);
         const stream = createSSEStream(response, () => null, undefined, undefined, 'req-1');
         const reader = stream.getReader();

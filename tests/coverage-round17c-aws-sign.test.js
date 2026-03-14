@@ -2,7 +2,7 @@
  * Round 17c: Final branch push — targeting exactly the remaining uncovered lines.
  * aws-signer L183, L208, L213, L274 + fetch-custom, format-anthropic, init, settings
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { AwsV4Signer } from '../src/lib/aws-signer.js';
 
 describe('aws-signer sign() — S3 specific branches (L208, L213, L274)', () => {
@@ -194,7 +194,7 @@ describe('aws-signer sign() — S3 specific branches (L208, L213, L274)', () => 
             service: 's3',
             region: 'us-east-1',
         });
-        const result = await signer.sign();
+        await signer.sign();
         expect(signer.encodedSearch).toBe('');
     });
 

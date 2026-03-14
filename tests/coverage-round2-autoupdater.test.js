@@ -5,7 +5,6 @@
  * Target: ~40+ uncovered branches.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { MAIN_UPDATE_URL } from '../src/lib/endpoints.js';
 
 // ─── Hoisted mocks (auto-updater) ───
 
@@ -45,17 +44,6 @@ vi.mock('../src/lib/settings-backup.js', () => ({
 }));
 
 import { SubPluginManager } from '../src/lib/sub-plugin-manager.js';
-
-const VALID_PLUGIN_CODE = [
-    '//@name Cupcake_Provider_Manager',
-    '//@display-name Cupcake Provider Manager',
-    '//@api 3.0',
-    '//@version 1.20.0',
-    `//@update-url ${MAIN_UPDATE_URL}`,
-    '//@arg cpm_openai_key string OpenAI API Key',
-    '',
-    '// plugin code',
-].join('\n');
 
 afterEach(() => {
     vi.restoreAllMocks();

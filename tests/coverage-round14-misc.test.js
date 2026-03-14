@@ -146,13 +146,11 @@ describe('token-usage.js additional branches — Round 14', () => {
 
 // ─── schema.js ───
 describe('schema.js additional branches — Round 14', () => {
-    let validateSchema, validateModel, validateSettings;
+    let validateSchema;
 
     beforeEach(async () => {
         const mod = await import('../src/lib/schema.js');
         validateSchema = mod.validateSchema;
-        validateModel = mod.validateModel;
-        validateSettings = mod.validateSettings;
     });
 
     it('validates array with maxItems truncation', () => {

@@ -743,14 +743,13 @@ describe('smartNativeFetch — deep branch coverage', () => {
 // ═══════════════════════════════════════════════════════
 
 describe('router.js handleRequest — branch coverage', () => {
-    let handleRequest, fetchByProviderId;
+    let handleRequest;
     let stateRef;
 
     beforeEach(async () => {
         vi.clearAllMocks();
         const mod = await import('../src/lib/router.js');
         handleRequest = mod.handleRequest;
-        fetchByProviderId = mod.fetchByProviderId;
         // Get reference to the mocked state
         const sharedState = await import('../src/lib/shared-state.js');
         stateRef = /** @type {any} */ (sharedState).state;
@@ -800,7 +799,7 @@ describe('router.js handleRequest — branch coverage', () => {
         const args = { prompt_chat: [{ role: 'user', content: 'summarize' }] };
         const modelDef = { provider: 'Custom_test', name: 'Test Model', uniqueId: 'test1' };
 
-        const result = await handleRequest(args, modelDef);
+        await handleRequest(args, modelDef);
         // The slot params should have been applied
         expect(args.max_tokens).toBe(2048);
         expect(args.temperature).toBe(0.3);
@@ -812,7 +811,7 @@ describe('router.js handleRequest — branch coverage', () => {
         const args = { prompt_chat: [{ role: 'user', content: 'test' }] };
         const modelDef = { provider: 'Custom_test', name: 'Test', uniqueId: 't1' };
 
-        const result = await handleRequest(args, modelDef);
+        await handleRequest(args, modelDef);
         expect(args.max_tokens).toBeUndefined();
     });
 
@@ -837,7 +836,7 @@ describe('router.js handleRequest — branch coverage', () => {
         mockFetchCustom.mockResolvedValueOnce(null);
         mockSafeGetArg.mockResolvedValue('');
         // Need to mock custom model lookup
-        const { default: state } = await import('../src/lib/router.js').then(async () => {
+        await import('../src/lib/router.js').then(async () => {
             // Actually the state comes from the module, let's just test with a provider that returns null
             return { default: null };
         });

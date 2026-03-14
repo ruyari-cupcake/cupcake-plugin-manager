@@ -11,7 +11,7 @@
  *   - init.js (15 uncov → target ~5)
  *   - router.js (20 uncov → target ~5)
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { formatToOpenAI } from '../src/lib/format-openai.js';
 import { formatToAnthropic } from '../src/lib/format-anthropic.js';
 import { formatToGemini, ThoughtSignatureCache } from '../src/lib/format-gemini.js';
@@ -21,7 +21,7 @@ import {
     parseGeminiNonStreamingResponse,
     parseClaudeNonStreamingResponse,
 } from '../src/lib/response-parsers.js';
-import { sanitizeMessages, extractNormalizedMessagePayload } from '../src/lib/sanitize.js';
+import { extractNormalizedMessagePayload } from '../src/lib/sanitize.js';
 
 // ═══════════════════════════════════════════════════════
 //  format-openai.js — uncovered branches
