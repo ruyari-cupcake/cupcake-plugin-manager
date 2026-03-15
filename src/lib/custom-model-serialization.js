@@ -65,7 +65,12 @@ export function normalizeCustomModel(raw, options = {}) {
         name: toText(raw?.name),
         model: toText(raw?.model),
         url: toText(raw?.url),
-        proxyUrl: toText(raw?.proxyUrl).trim(),
+        proxyUrl: (() => {
+            let _pUrl = toText(raw?.proxyUrl).trim();
+            // Auto-prepend https:// for bare domains on save
+            if (_pUrl && !/^https?:\/\//i.test(_pUrl)) _pUrl = 'https://' + _pUrl;
+            return _pUrl;
+        })(),
         format: toText(raw?.format || 'openai') || 'openai',
         tok: toText(raw?.tok || 'o200k_base') || 'o200k_base',
         responsesMode: toText(raw?.responsesMode || 'auto') || 'auto',

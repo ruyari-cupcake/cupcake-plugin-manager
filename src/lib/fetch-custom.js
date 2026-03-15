@@ -341,7 +341,13 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
 
     // ── CORS Proxy: proxyUrl이 설정되어 있으면 도메인을 프록시로 교체 ──
     // Responses API URL 재작성 후에 적용해야 올바른 경로를 프록시로 보냄
-    const _proxyUrl = (config.proxyUrl || '').replace(/\/+$/, '');
+    // 모든 API URL에 적용됨 (Copilot, Google, NVIDIA, 기타 커스텀 API 모두)
+    let _proxyUrl = (config.proxyUrl || '').trim().replace(/\/+$/, '');
+    // Auto-prepend https:// if user entered bare domain (e.g. "my-server.kr/proxy")
+    if (_proxyUrl && !/^https?:\/\//i.test(_proxyUrl)) {
+        _proxyUrl = 'https://' + _proxyUrl;
+        console.log(`[Cupcake PM] proxyUrl missing scheme — auto-prepended https:// → ${_proxyUrl}`);
+    }
     const _isProxied = !!_proxyUrl;
     if (_proxyUrl && effectiveUrl) {
         try {
@@ -350,8 +356,10 @@ export async function fetchCustom(config, messagesRaw, temp, maxTokens, args = {
             effectiveUrl = _proxyBase.origin + _proxyBase.pathname.replace(/\/+$/, '') + _origUrl.pathname + _origUrl.search;
             console.log(`[Cupcake PM] CORS Proxy active → ${effectiveUrl}`);
         } catch (_e) {
-            console.warn(`[Cupcake PM] Invalid proxyUrl: ${_proxyUrl}`, _e);
+            console.error(`[Cupcake PM] ❌ Invalid proxyUrl "${_proxyUrl}" — proxy NOT applied. URL 형식을 확인하세요 (예: https://my-server.kr/proxy).`, _e);
         }
+    } else if (!_proxyUrl && effectiveUrl) {
+        console.log(`[Cupcake PM] No proxyUrl configured for ${effectiveUrl.substring(0, 60)} — direct request mode`);
     }
 
     // ── Core fetch logic (wrapped for key rotation) ──
