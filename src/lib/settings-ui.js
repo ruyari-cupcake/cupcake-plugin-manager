@@ -284,24 +284,41 @@ export async function openCpmSettings() {
                 <h4 class="text-xl font-bold text-orange-400 mb-4">🔗 HypaV3 임베딩 프록시</h4>
                 <div class="bg-gray-800/70 border border-orange-900/50 rounded-lg p-4 mb-4">
                     <p class="text-xs text-orange-300 mb-3 font-semibold">⚡ Nodeless 환경에서 HypaV3 임베딩 사용하기</p>
-                    <p class="text-xs text-gray-400 mb-3">Nodeless(도커/셀프호스트) 환경에서는 HypaV3의 custom 임베딩이 CORS/프록시 인증 문제로 실패합니다. <strong class="text-orange-200">copilot-proxy.exe</strong>를 로컬에서 실행하면 해결됩니다.</p>
+                    <p class="text-xs text-gray-400 mb-3">Nodeless(도커/셀프호스트) 환경에서는 HypaV3의 custom 임베딩이 CORS/프록시 인증 문제로 실패합니다. 아래 두 방법 중 하나를 쓰면 해결됩니다.</p>
+
                     <div class="bg-gray-900 rounded p-3 mb-3">
-                        <p class="text-xs font-bold text-yellow-400 mb-2">📋 설정 (config 파일 필요 없음!):</p>
-                        <ol class="text-xs text-gray-300 space-y-2 list-decimal list-inside">
+                        <p class="text-xs font-bold text-green-400 mb-2">🖥️ 방법 1: 로컬 프록시 (copilot-proxy.exe)</p>
+                        <ol class="text-xs text-gray-300 space-y-1.5 list-decimal list-inside">
                             <li>copilot-proxy.exe 실행</li>
-                            <li>리스AI → 봇 설정 → 하이파V3:
-                                <div class="mt-1 space-y-1">
+                            <li>하이파V3:
+                                <div class="mt-1 space-y-0.5">
                                     <div class="flex items-center text-[11px]"><span class="text-gray-500 w-28 shrink-0">모델:</span><code class="bg-gray-700 px-1 rounded text-cyan-300">custom</code></div>
                                     <div class="flex items-center text-[11px]"><span class="text-gray-500 w-28 shrink-0">Custom Server URL:</span><code class="bg-gray-700 px-1 rounded text-cyan-300">http://localhost:18976/v1</code></div>
                                     <div class="flex items-center text-[11px]"><span class="text-gray-500 w-28 shrink-0">API Key:</span><code class="bg-gray-700 px-1 rounded text-cyan-300">(본인의 임베딩 API 키)</code></div>
                                     <div class="flex items-center text-[11px]"><span class="text-gray-500 w-28 shrink-0">Model:</span><code class="bg-gray-700 px-1 rounded text-cyan-300">(본인이 쓰는 모델명)</code></div>
                                 </div>
                             </li>
-                            <li>끝! 모델명에서 프로바이더를 자동 감지합니다.</li>
                         </ol>
                     </div>
-                    <div class="bg-gray-900/50 rounded p-2 mb-3">
-                        <p class="text-[10px] text-gray-500 mb-1">자동 감지 지원 모델:</p>
+
+                    <div class="bg-gray-900 rounded p-3 mb-3">
+                        <p class="text-xs font-bold text-blue-400 mb-2">☁️ 방법 2: Cloudflare Worker (인터넷 배포)</p>
+                        <p class="text-[10px] text-gray-400 mb-2">로컬 exe 없이 인터넷에서 돌리고 싶으면 클플 워커로 배포 가능. 클플_프록시.md 참고.</p>
+                        <ol class="text-xs text-gray-300 space-y-1.5 list-decimal list-inside">
+                            <li>Cloudflare Workers에 코드 복붙 → Deploy</li>
+                            <li>하이파V3:
+                                <div class="mt-1 space-y-0.5">
+                                    <div class="flex items-center text-[11px]"><span class="text-gray-500 w-28 shrink-0">모델:</span><code class="bg-gray-700 px-1 rounded text-cyan-300">custom</code></div>
+                                    <div class="flex items-center text-[11px]"><span class="text-gray-500 w-28 shrink-0">Custom Server URL:</span><code class="bg-gray-700 px-1 rounded text-cyan-300">https://내워커.workers.dev/v1</code></div>
+                                    <div class="flex items-center text-[11px]"><span class="text-gray-500 w-28 shrink-0">API Key:</span><code class="bg-gray-700 px-1 rounded text-cyan-300">(본인의 임베딩 API 키)</code></div>
+                                    <div class="flex items-center text-[11px]"><span class="text-gray-500 w-28 shrink-0">Model:</span><code class="bg-gray-700 px-1 rounded text-cyan-300">(본인이 쓰는 모델명)</code></div>
+                                </div>
+                            </li>
+                        </ol>
+                    </div>
+
+                    <div class="bg-gray-900/50 rounded p-2 mb-2">
+                        <p class="text-[10px] text-gray-500 mb-1">두 방법 모두 모델명 자동 감지 지원:</p>
                         <div class="grid grid-cols-2 gap-x-4 gap-y-0.5 text-[10px]">
                             <div><code class="text-cyan-400">voyage-*</code> <span class="text-gray-600">→ Voyage AI</span></div>
                             <div><code class="text-cyan-400">text-embedding-*</code> <span class="text-gray-600">→ OpenAI</span></div>
