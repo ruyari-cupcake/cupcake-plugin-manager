@@ -17,6 +17,7 @@
     "build:css": "node scripts/build-tailwind.cjs",
     "build": "npm run build:css && rollup -c rollup.config.mjs",
     "build:production": "node scripts/build-production.cjs",
+    "verify:production-url": "node scripts/verify-production-url.cjs --force",
     "wait:input": "node scripts/wait-for-input.cjs"
   },
   "devDependencies": {

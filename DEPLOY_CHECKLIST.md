@@ -5,19 +5,41 @@
 > 1. 저장소에 추적해야 하는 파일
 > 2. 실제 공개 배포물에 포함할 파일
 
-> ## ⛔ AI 에이전트 필독 — 절대 규칙 ⛔
+> ## ⛔⛔⛔ AI 에이전트 최우선 규칙 — push 대상 ⛔⛔⛔
 >
-> **`origin/main` (본서버)에 절대로 push하지 마라.**
-> 모든 작업은 `test/main` (테스트서버)에만 push한다.
-> 사용자가 직접 "본서버에 올려"라고 말한 경우에만 `origin/main`에 push 가능.
-> **위반 시 자동 업데이트로 다른 사용자에게 버그가 전파된다.**
+> **기본 push 리모트: `test` (테스트서버)**
+>
+> ```
+> git push test main          ← 기본. "푸시해" = 이것
+> git push origin main        ← 금지. "본서버에 올려" = 이것 (명시적 요청 시에만)
+> ```
+>
+> ### 규칙 요약
+> - `git push` 시 리모트를 반드시 명시한다 (`test` 또는 `origin`)
+> - 사용자가 대상을 지정하지 않으면 → **무조건 `test`**
+> - `origin`은 사용자가 현재 대화에서 "본서버"/"origin"/"프로덕션"을 **직접 말한 경우에만** 사용
+> - **`origin/main`에 push하면 Vercel 자동 배포 → 실사용자 수백 명에게 즉시 반영 → 버그 전파**
+>
+> ### 필수 참조
+> - push 전에 반드시 [`.github/copilot-instructions.md`](.github/copilot-instructions.md)의 최우선 규칙 섹션을 확인한다
+> - push 전에 반드시 [DEPLOY.md](DEPLOY.md)의 리모트 구조를 확인한다
 
-> ## ⛔ AI 에이전트 필독 — 절대 규칙 ⛔
+> ## 🚨🚨🚨 프로덕션(origin) push 전 — URL 검증 필수 🚨🚨🚨
 >
-> **`origin/main` (본서버)에 절대로 push하지 마라.**
-> 모든 작업은 `test/main` (테스트서버)에만 push한다.
-> 사용자가 직접 "본서버에 올려"라고 말한 경우에만 `origin/main`에 push 가능.
-> **위반 시 자동 업데이트로 다른 사용자에게 버그가 전파된다.**
+> **origin에 push하기 전에 반드시 아래를 확인한다:**
+>
+> | 검증 항목 | 올바른 값 (프로덕션) | 잘못된 값 (테스트) |
+> |-----------|--------------------|--------------------|
+> | `provider-manager.js` `@update-url` | `cupcake-plugin-manager.vercel.app` | `cupcake-plugin-manager-test.vercel.app` |
+> | `provider-manager.js` `const _env` | `'production'` | `'test'` |
+> | `dist/provider-manager.js` `@update-url` | `cupcake-plugin-manager.vercel.app` | `cupcake-plugin-manager-test.vercel.app` |
+> | `dist/provider-manager.js` `const _env` | `'production'` | `'test'` |
+>
+> **자동 검증:** `npm run verify:production-url`
+>
+> **자동 차단:** pre-push hook이 origin push 시 테스트 URL을 감지하면 push를 차단한다.
+>
+> **사고 이력 (2026-03-15):** `CPM_ENV=production` 없이 빌드 → 테스트 URL이 프로덕션에 배포됨
 
 ---
 
@@ -90,6 +112,8 @@
 
 ## 5. 푸시 전 확인
 
+### 모든 push (test / origin 공통)
+
 ```bash
 # 1) 소스 원본이 추적되고 있는지 확인
 git ls-files | sort
@@ -107,7 +131,28 @@ npm run test:release-sync
 npm run test:coverage
 ```
 
-추가로, Husky `pre-push` 훅도 같은 검증을 자동 실행한다.
+### 🚨 origin(프로덕션) push 시 추가 필수 확인
+
+```bash
+# 6) 프로덕션 URL 검증 (origin push 전 필수!)
+npm run verify:production-url
+
+# 또는 수동으로 직접 확인:
+# provider-manager.js의 @update-url이 프로덕션 URL인지:
+Select-String -Path provider-manager.js -Pattern "@update-url" | Select-Object -First 1
+#   → 반드시 cupcake-plugin-manager.vercel.app 이어야 함
+#   → cupcake-plugin-manager-test 가 보이면 절대 push 금지!
+
+# provider-manager.js의 _env가 production인지:
+Select-String -Path provider-manager.js -Pattern "const _env\b" | Select-Object -First 1
+#   → const _env = 'production'; 이어야 함
+#   → const _env = 'test'; 이면 절대 push 금지!
+```
+
+**pre-push hook 자동 검증:**
+Husky `pre-push` 훅이 모든 push에 대해 lint/typecheck/build/release-sync를 검증하고,
+origin push를 감지하면 추가로 `scripts/verify-production-url.cjs`를 실행하여
+테스트 URL이 포함된 산출물이 프로덕션에 올라가는 것을 자동으로 차단한다.
 
 추가 확인 포인트:
 

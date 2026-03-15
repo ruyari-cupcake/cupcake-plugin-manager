@@ -1,6 +1,19 @@
+#!/usr/bin/env sh
+
+# ── 1. 기본 품질 검증 (모든 push 대상) ──
 npm run lint
 npm run build:css
 npm run typecheck
 npm run build
 npm run verify:release-sync
+npm run test:release-sync
+
+# ── 2. 프로덕션 URL 일관성 테스트 (모든 push 대상) ──
+# @update-url과 _env가 서로 모순되지 않는지 검증
+npx vitest run tests/production-url-guard.test.js
+
+# ── 3. 프로덕션(origin) push 시 URL 검증 ──
+# Git pre-push hook은 stdin으로 refs를 받고, $1=remote-name $2=remote-url 을 인자로 받는다.
+# 프로덕션 레포로 push할 때 테스트 서버 URL이 박혀있으면 차단한다.
+node scripts/verify-production-url.cjs "$1" "$2"
 npm run test:release-sync
